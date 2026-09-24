@@ -1,0 +1,9 @@
+# requirements-login.txt -- on-demand deps for QR-code login scripts
+# Only required when running scripts/login_bilibili.py or scripts/login_douyin.py
+# for the first time to auto-export cookies. Install commands:
+#     pip install -r requirements-login.txt
+#     python -m playwright install chromium
+#
+# Only playwright is needed here; it will additionally download a
+# bundled Chromium (~150 MB) on first `playwright install chromium`.
+playwright>=1.40

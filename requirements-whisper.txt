@@ -1,0 +1,26 @@
+﻿# ===== video-summarizer Whisper 通路依赖（按需安装）=====
+#
+# 仅在视频没有可用字幕、需要走本地 Whisper 转写时才需要安装。
+# 安装方式：pip install -r requirements-whisper.txt
+#
+# 安装后还需下载模型文件（~1.4 GB for medium）：
+#   python scripts/download_model.py --size medium
+#
+# 可选模型尺寸（按体积从小到大）：
+#   tiny     (~75 MB)   速度最快，准确度较差
+#   base     (~145 MB)
+#   small    (~460 MB)  中英文基本够用，体积小
+#   medium   (~1.4 GB)  ✅ 推荐（中英文较均衡）
+#   large-v3 (~3.0 GB)  准确度最高，占显存最多
+#
+
+# faster-whisper：本地 GPU/CPU 转写核心
+faster-whisper>=1.0.0
+
+# huggingface_hub：用于从 HuggingFace 下载 faster-whisper 模型
+huggingface_hub>=0.20.0
+
+# 可选：如果你的机器有 NVIDIA GPU 且想走 CUDA，请根据自己 CUDA 版本
+# 自行安装 torch，例如：
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# faster-whisper 本身基于 ctranslate2，不强依赖 torch；无 torch 时会走 ctranslate2 自带 CUDA/CPU。

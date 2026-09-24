@@ -1,0 +1,24 @@
+[
+  {
+    "domain": ".bilibili.com",
+    "hostOnly": false,
+    "path": "/",
+    "secure": true,
+    "httpOnly": true,
+    "session": false,
+    "name": "SESSDATA",
+    "value": "这里是你的 cookie 值",
+    "expirationDate": 1790000000.0
+  },
+  {
+    "domain": ".bilibili.com",
+    "hostOnly": false,
+    "path": "/",
+    "secure": false,
+    "httpOnly": false,
+    "session": false,
+    "name": "bili_jct",
+    "value": "这里是你的 cookie 值",
+    "expirationDate": 1790000000.0
+  }
+]

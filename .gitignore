@@ -1,0 +1,59 @@
+# ⚠️ 注意：.gitignore 不支持「行尾注释」，注释必须独占一行，
+#    否则 `tools/  # 说明` 会被当成字面路径，规则失效。
+
+# ===== 登录凭证（含账号 cookies，切勿提交）=====
+*_cookies.json
+cookies.json
+cookies.txt
+
+# ===== 输出 / 下载产物 =====
+output/
+downloads/
+videos/
+*.mp3
+*.m4a
+*.wav
+*.webm
+*.mp4
+*.mkv
+*.srt
+*.vtt
+
+# ===== Whisper 模型（单个可达 3GB）=====
+models/
+
+# ===== 第三方可执行文件（deno.exe 约 120MB，超 GitHub 限制）=====
+bin/
+*.exe
+*.dll
+
+# ===== 打包产物 =====
+build/
+dist/
+*.spec
+
+# ===== 界面自动下载的工具（便携版 Python / FFmpeg / Deno）=====
+tools/
+
+# ===== 界面本地配置与工作目录 =====
+gui_config.json
+VideoSummarizer-Data/
+
+# ===== 日志 =====
+logs/
+*.log
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ===== IDE / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

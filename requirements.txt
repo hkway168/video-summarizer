@@ -1,0 +1,9 @@
+﻿# ===== video-summarizer 基础依赖（字幕通路 / 下载通路必需）=====
+# 安装方式：pip install -r requirements.txt
+#
+# 👉 如果需要使用 Whisper 本地转写功能（没有字幕的视频回退方案），
+#    请额外执行：pip install -r requirements-whisper.txt
+#    并运行：  python scripts/download_model.py --size medium
+#
+yt-dlp>=2024.1.0
+rich>=13.0.0

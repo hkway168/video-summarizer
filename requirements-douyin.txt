@@ -1,0 +1,12 @@
+# requirements-douyin.txt -- on-demand deps for the Douyin enhanced downloader.
+# Only required when the default yt-dlp Douyin extractor gets blocked by douyin
+# risk control (typical error message: "Fresh cookies (not necessarily logged in)
+# are needed"). f2 is a Python library that implements Douyin's dynamic signature
+# algorithm (a_bogus / X-Bogus), which yt-dlp's extractor currently does not.
+#
+# Install commands:
+#     pip install -r requirements-douyin.txt
+#
+# If not installed, the project transparently falls back to yt-dlp (the old
+# behavior for YouTube / Bilibili / Douyin is preserved).
+f2>=0.0.1
