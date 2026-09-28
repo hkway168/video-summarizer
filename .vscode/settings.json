@@ -1,0 +1,68 @@
+{
+  // ── 编码：项目内中文很多，统一 UTF-8，避免 Windows GBK 乱码 ──
+  "files.encoding": "utf8",
+  "files.autoGuessEncoding": false,
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  // ── Python ──
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}"
+  ],
+  "python.analysis.typeCheckingMode": "basic",
+  "python.terminal.activateEnvironment": true,
+  "python.terminal.launchArgs": [],
+
+  // 在集成终端里也强制 UTF-8，跑 CLI 时 emoji 才不会报错
+  "terminal.integrated.env.windows": {
+    "PYTHONUTF8": "1",
+    "PYTHONIOENCODING": "utf-8"
+  },
+
+  "[python]": {
+    "editor.rulers": [
+      100
+    ],
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  },
+
+  // ── 资源管理器：隐藏运行时产物，让源码结构更清爽 ──
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "build": true,
+    "dist": true,
+    "VideoSummarizer-Data": true
+  },
+
+  // 搜索时跳过大目录与生成物
+  "search.exclude": {
+    "**/__pycache__": true,
+    "models": true,
+    "output": true,
+    "downloads": true,
+    "videos": true,
+    "tools": true,
+    "bin": true,
+    "logs": true,
+    "build": true,
+    "dist": true,
+    "VideoSummarizer-Data": true
+  },
+
+  // 这些目录体积大且频繁变动，别让文件监听器扫它们（省 CPU / 内存）
+  "files.watcherExclude": {
+    "**/__pycache__/**": true,
+    "**/models/**": true,
+    "**/output/**": true,
+    "**/downloads/**": true,
+    "**/videos/**": true,
+    "**/tools/**": true,
+    "**/bin/**": true,
+    "**/build/**": true,
+    "**/dist/**": true,
+    "**/VideoSummarizer-Data/**": true
+  }
+}

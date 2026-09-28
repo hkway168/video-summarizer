@@ -1,0 +1,17 @@
+﻿# ===== 开发 / 调试用依赖（可选）=====
+#
+# 正常在 IDE 里按 F5 调试**不需要**装这些：
+#   VSCode / CodeBuddy 的 Python 扩展（ms-python.debugpy）已内置 debugpy。
+#
+# 以下场景才需要手动安装：
+#   * 想用 `python -m debugpy --listen 5678 --wait-for-client xxx.py` 做远程/附加调试
+#   * 想在没装 Python 扩展的环境里调试
+#   * 需要打包 exe（pyinstaller）
+#
+# 安装：pip install -r requirements-dev.txt
+
+# 调试器（IDE 扩展已内置，仅远程调试时需要）
+debugpy>=1.8.0
+
+# 打包 exe
+pyinstaller>=6.0

@@ -1,0 +1,162 @@
+{
+  // 常用任务：Ctrl+Shift+P → "Tasks: Run Task"
+  // 其中「🖥️ 启动 GUI（不调试）」被设为默认构建任务，可用 Ctrl+Shift+B 直接跑
+  "version": "2.0.0",
+  "options": {
+    "cwd": "${workspaceFolder}",
+    "env": {
+      "PYTHONUTF8": "1",
+      "PYTHONIOENCODING": "utf-8"
+    }
+  },
+  "presentation": {
+    "echo": true,
+    "reveal": "always",
+    "panel": "dedicated",
+    "clear": true
+  },
+  "tasks": [
+    {
+      "label": "🖥️ 启动 GUI（不调试）",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "app_gui.py"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "🔍 环境体检",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "-c",
+        "from gui.core import env_manager as e; r = e.inspect_environment(None); print(f'Python {r.python_ver}  {r.python}'); [print(f'  {i.icon} {i.name:<28} {i.status_text:<10} {i.detail[:60]}') for i in r.items]"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "📦 安装基础依赖 (yt-dlp / rich)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "requirements.txt",
+        "-i",
+        "https://pypi.tuna.tsinghua.edu.cn/simple"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "🎙 安装 Whisper 依赖",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "requirements-whisper.txt",
+        "-i",
+        "https://pypi.tuna.tsinghua.edu.cn/simple"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "🔐 安装登录依赖 (playwright)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "requirements-login.txt",
+        "-i",
+        "https://pypi.tuna.tsinghua.edu.cn/simple"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "⬆ 升级 yt-dlp（平台风控时最常用）",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "-m",
+        "pip",
+        "install",
+        "-U",
+        "yt-dlp",
+        "-i",
+        "https://pypi.tuna.tsinghua.edu.cn/simple"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "📋 查看本地 Whisper 模型",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "main.py",
+        "--list-models"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "🌐 查看可用于扫码登录的浏览器",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "scripts/login_bilibili.py",
+        "--list-browsers"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "🧪 GUI 自检（遍历所有页）",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "app_gui.py",
+        "--selftest"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "🏗️ 打包 exe",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "build_exe.py"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "🏗️ 打包 exe（保留控制台，排错用）",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "build_exe.py",
+        "--console"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "🧹 清理打包产物",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "build_exe.py",
+        "--clean-only"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

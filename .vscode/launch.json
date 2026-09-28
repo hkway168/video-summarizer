@@ -1,0 +1,291 @@
+{
+  // 调试配置：按 F5 选择要运行的目标
+  // 说明：
+  //   * "🖥️ GUI" 用于调试图形界面本身
+  //   * 带「(询问链接)」的配置运行时会弹输入框，粘贴 URL 即可
+  //   * GUI 是通过子进程调用 CLI 的，调试 CLI 逻辑请直接选对应的 CLI 配置，
+  //     不要在 GUI 里打断点等子进程（断点不会命中子进程）
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "🖥️ GUI 图形界面",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app_gui.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    {
+      "name": "🖥️ GUI 指定起始页",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app_gui.py",
+      "args": [
+        "--page=${input:guiPage}"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    {
+      "name": "🖥️ GUI 自检（遍历所有页后退出）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app_gui.py",
+      "args": [
+        "--selftest"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+
+    {
+      "name": "🎬 一键转写（询问链接）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": [
+        "${input:videoUrl}",
+        "--json"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    {
+      "name": "🎬 一键转写 · 仅字幕（不走 Whisper，最快）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": [
+        "${input:videoUrl}",
+        "--mode",
+        "subtitle-only",
+        "--json"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    {
+      "name": "🎬 一键转写 · 列出支持的平台",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": [
+        "--list-platforms"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+
+    {
+      "name": "⬇️ 只下载（询问链接）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/media_downloader.py",
+      "args": [
+        "${input:videoUrl}",
+        "--json",
+        "-o",
+        "${workspaceFolder}/videos"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    {
+      "name": "⬇️ 只下载 · 仅音频 mp3",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/media_downloader.py",
+      "args": [
+        "${input:videoUrl}",
+        "--kind",
+        "audio",
+        "--audio-format",
+        "mp3",
+        "--json",
+        "-o",
+        "${workspaceFolder}/videos"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+
+    {
+      "name": "📁 本地转写 · 当前打开的文件",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/transcribe_file.py",
+      "args": [
+        "${file}",
+        "--json",
+        "-o",
+        "${workspaceFolder}/output"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    {
+      "name": "📁 本地转写（询问文件路径）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/transcribe_file.py",
+      "args": [
+        "${input:mediaPath}",
+        "--json",
+        "-o",
+        "${workspaceFolder}/output"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+
+    {
+      "name": "📦 下载 Whisper 模型（询问尺寸）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/download_model.py",
+      "args": [
+        "--size",
+        "${input:modelSize}",
+        "--mirror",
+        "https://hf-mirror.com"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+    {
+      "name": "🔐 扫码登录（询问平台）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/login_${input:loginPlatform}.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    },
+
+    {
+      "name": "🐍 运行当前文件",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  ],
+
+  "inputs": [
+    {
+      "id": "videoUrl",
+      "type": "promptString",
+      "description": "视频链接（YouTube / 哔哩哔哩 / 抖音）",
+      "default": "https://www.bilibili.com/video/BV1xx411c7mD/"
+    },
+    {
+      "id": "mediaPath",
+      "type": "promptString",
+      "description": "本地音频/视频文件的完整路径"
+    },
+    {
+      "id": "guiPage",
+      "type": "pickString",
+      "description": "GUI 启动时显示哪一页",
+      "options": [
+        "transcribe",
+        "download",
+        "local",
+        "models",
+        "outputs",
+        "env"
+      ],
+      "default": "transcribe"
+    },
+    {
+      "id": "modelSize",
+      "type": "pickString",
+      "description": "Whisper 模型尺寸",
+      "options": [
+        "tiny",
+        "base",
+        "small",
+        "medium",
+        "large-v2",
+        "large-v3"
+      ],
+      "default": "medium"
+    },
+    {
+      "id": "loginPlatform",
+      "type": "pickString",
+      "description": "要登录的平台",
+      "options": [
+        "bilibili",
+        "douyin"
+      ],
+      "default": "bilibili"
+    }
+  ]
+}

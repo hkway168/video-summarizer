@@ -1,0 +1,8 @@
+{
+  // 打开项目时 IDE 会提示安装这些插件（可忽略）
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.debugpy",
+    "ms-python.vscode-pylance"
+  ]
+}

@@ -99,6 +99,10 @@ pip install nvidia-cudnn-cu12==9.*
 
 详见 [GUI使用说明.md](GUI使用说明.md)。开发态运行：`python app_gui.py`；重新打包：`python build_exe.py`。
 
+> 🛠️ **想在 IDE 里运行/调试？** 项目已内置 VSCode / CodeBuddy 配置：
+> 按 `Ctrl+Shift+B` 直接启动 GUI，按 `F5` 选择调试目标（GUI / 一键转写 / 只下载 / 本地转写…）。
+> 详见 [开发调试.md](开发调试.md)。
+
 ### 方式 A：在 VSCode 中用 Skill 调用（推荐）⭐
 
 1. 打开 CodeBuddy/Claude 对话

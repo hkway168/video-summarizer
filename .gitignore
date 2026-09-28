@@ -52,7 +52,13 @@ venv/
 env/
 
 # ===== IDE / 系统 =====
-.vscode/
+# .vscode 下的运行/调试配置是团队共享的，予以保留；
+# 只忽略因人而异的个人配置。
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 .DS_Store
 Thumbs.db
