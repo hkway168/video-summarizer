@@ -155,7 +155,10 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
                     lightcolor=c["border"], darkcolor=c["border"], arrowcolor=c["muted"],
                     padding=4)
     style.map("TCombobox",
-              fieldbackground=[("readonly", "#ffffff"), ("disabled", "#f4f6f9")],
+              fieldbackground=[("disabled", "#f4f6f9"), ("readonly", "#ffffff")],
+              foreground=[("disabled", c["muted"]), ("readonly", c["text"])],
+              selectbackground=[("disabled", "#f4f6f9"), ("!disabled", "#ffffff")],
+              selectforeground=[("disabled", c["muted"]), ("!disabled", c["text"])],
               bordercolor=[("focus", c["accent"])])
 
     style.configure("TSeparator", background=c["border"])

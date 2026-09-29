@@ -299,6 +299,57 @@ def project_ready() -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# 登录态（cookies）探测
+# ══════════════════════════════════════════════════════════════════════
+def cookies_file(platform: str) -> Path:
+    """某平台的 cookies 文件路径（项目根 / 运行时目录下）。"""
+    return runtime_dir() / f"{platform}_cookies.json"
+
+
+def cookies_ready(platform: str) -> bool:
+    """该平台的 cookies 是否存在且有实际内容。
+
+    扫码登录脚本会先创建 0 字节 / `[]` 占位文件，所以只判断"文件存在"不够，
+    必须确认里面真有 cookie 条目——判定逻辑与 downloader._cookie_file_has_content 一致。
+    """
+    for name in (f"{platform}_cookies.json", f"{platform}_cookies.txt"):
+        p = runtime_dir() / name
+        try:
+            if not p.exists() or p.stat().st_size == 0:
+                continue
+            text = p.read_text(encoding="utf-8", errors="replace").strip()
+            if not text or text in ("[]", "{}"):
+                continue
+            if text.startswith("{") or text.startswith("["):
+                import json as _json
+                try:
+                    data = _json.loads(text)
+                except Exception:
+                    return True          # 有内容但解析不了，交给下游报准确的错
+                if isinstance(data, list):
+                    if data:
+                        return True
+                    continue
+                if isinstance(data, dict):
+                    if data.get("cookies"):
+                        return True
+                    if any(isinstance(v, list) and v for v in data.values()):
+                        return True
+                    continue
+            # Netscape 纯文本：至少一行非注释内容
+            if any(s.strip() and not s.strip().startswith("#") for s in text.splitlines()):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def douyin_logged_in() -> bool:
+    """抖音是否已有可用登录态（批量下载收藏/喜欢的前置条件）。"""
+    return cookies_ready("douyin")
+
+
+# ══════════════════════════════════════════════════════════════════════
 # 残留文件清理
 #
 # v1.0.0 的 exe 在独立运行时会把内置脚本**零散地**释放到 exe 所在目录，

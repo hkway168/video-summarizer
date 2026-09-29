@@ -99,8 +99,33 @@ try:
     out["cuda_devices"] = int(ctranslate2.get_cuda_device_count())
 except Exception:
     out["cuda_devices"] = -1
+out["cuda_libs_missing"] = []
+if sys.platform == "win32" and out["cuda_devices"] > 0:
+    import ctypes, os
+    for pkg in ("nvidia.cublas", "nvidia.cudnn", "nvidia.cuda_runtime", "nvidia.cuda_nvrtc"):
+        try:
+            spec = importlib.util.find_spec(pkg)
+            if spec and spec.submodule_search_locations:
+                d = os.path.join(list(spec.submodule_search_locations)[0], "bin")
+                if os.path.isdir(d):
+                    os.add_dll_directory(d)
+        except Exception:
+            pass
+    for dll in %(dlls)r:
+        try:
+            ctypes.WinDLL(dll)
+        except OSError:
+            try:
+                ctypes.WinDLL(dll, winmode=0)
+            except OSError:
+                out["cuda_libs_missing"].append(dll)
 sys.stdout.write("###PROBE###" + json.dumps(out))
 '''
+
+# 与 transcriber._CUDA_REQUIRED_DLLS / CUDA_PIP_PACKAGES 保持一致
+CUDA_REQUIRED_DLLS = ("cublas64_12.dll", "cublasLt64_12.dll", "cudnn_ops64_9.dll", "cudnn_cnn64_9.dll")
+CUDA_PIP_PACKAGES = ("nvidia-cublas-cu12", "nvidia-cudnn-cu12==9.*")
+_PROBE_SCRIPT = _PROBE_SCRIPT.replace("%(dlls)r", repr(CUDA_REQUIRED_DLLS))
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -178,6 +203,41 @@ def resolve_python(cfg=None) -> str:
         return sys.executable
     cands = find_python_candidates()
     return cands[0] if cands else ""
+
+
+def has_core_deps(python: str) -> bool:
+    """该解释器是否已装好核心依赖（当前以 yt-dlp 为准）。
+
+    用途：当前解释器缺依赖时，用它筛出本机另一个"装好的"解释器，
+    引导用户一键切换，省掉重装一遍的时间。
+
+    只 import 不执行业务逻辑，失败一律返回 False（宁可不提示，也不能误导）。
+    """
+    if not python or not Path(python).is_file():
+        return False
+    try:
+        r = subprocess.run(
+            [python, "-c", "import yt_dlp"],
+            capture_output=True, timeout=20,
+            creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def invalidate_python_cache() -> None:
+    """丢弃与「当前 Python 解释器」相关的进程内缓存。
+
+    调用时机：用户手动切换了解释器、或刚装完依赖/创建完 venv，
+    此时旧的探测结果已经过期，必须让下一次体检重新实测。
+
+    当前 `python_version()` / `probe()` 都是**每次实际起子进程**、不做缓存，
+    所以这里只需要清掉浏览器查找器缓存，其余是空操作。
+    保留这个函数是为了给调用方一个稳定的语义入口——将来如果给探测加了缓存，
+    只需在此处补清理逻辑，不必再去改各个页面。
+    """
+    _BROWSER_FINDER_CACHE.clear()
 
 
 def python_version(python: str) -> str:
@@ -391,8 +451,13 @@ def inspect_environment(cfg=None) -> EnvReport:
                                "装个 Edge/Chrome 即可；或双击本行下载 Chromium"))
 
     cuda = int(info.get("cuda_devices", -1))
-    if cuda > 0:
-        items.append(CheckItem("gpu", "GPU 加速", "ok", f"检测到 {cuda} 张 CUDA 显卡"))
+    cuda_missing = list(info.get("cuda_libs_missing") or [])
+    if cuda > 0 and cuda_missing:
+        items.append(CheckItem("gpu", "GPU 加速", "optional",
+                               f"检测到 {cuda} 张 CUDA 显卡，但缺少运行库：{', '.join(cuda_missing)}",
+                               "双击本行安装 cuBLAS / cuDNN（约 2GB）；不装则自动用 CPU 转写"))
+    elif cuda > 0:
+        items.append(CheckItem("gpu", "GPU 加速", "ok", f"检测到 {cuda} 张 CUDA 显卡，运行库已就绪"))
     elif has_nvidia_gpu():
         items.append(CheckItem("gpu", "GPU 加速", "unknown", "有 NVIDIA 显卡，但 ctranslate2 未就绪",
                                "安装 Whisper 依赖后再检测"))
@@ -538,6 +603,11 @@ def pip_install_packages_task(python: str, packages: Sequence[str], cfg,
     argv += list(packages)
     return ProcessTask(argv, cwd=paths.runtime_dir(), env=build_env(),
                        title=title or f"安装 {' '.join(packages)}")
+
+
+def install_cuda_libs_task(python: str, cfg) -> ProcessTask:
+    return pip_install_packages_task(python, CUDA_PIP_PACKAGES, cfg,
+                                     title="安装 GPU 运行库 (cuBLAS / cuDNN，约 2GB)")
 
 
 def upgrade_ytdlp_task(python: str, cfg) -> ProcessTask:

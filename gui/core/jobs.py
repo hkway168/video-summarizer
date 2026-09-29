@@ -44,6 +44,14 @@ def parse_result(lines: Sequence[str]) -> dict | None:
         return None
 
 
+# Whisper 计算设备：(下拉框文案, --device 取值)
+DEVICES = [
+    ("自动（有 GPU 运行库就用 GPU，否则 CPU）", "auto"),
+    ("GPU（NVIDIA 显卡，需 CUDA 运行库）", "cuda"),
+    ("CPU（无需额外安装，较慢）", "cpu"),
+]
+
+
 # ══════════════════════════════════════════════════════════════════════
 # ① 一键：下载/字幕 + 转写
 # ══════════════════════════════════════════════════════════════════════
@@ -60,6 +68,7 @@ def build_oneshot_argv(
     sub_lang: str = "",
     keep_audio: bool = False,
     no_auto_sub: bool = False,
+    device: str = "auto",
 ) -> list[str]:
     argv = [python, "main.py"]
     if len(urls) == 1:
@@ -74,6 +83,8 @@ def build_oneshot_argv(
         argv += ["--model", model]
     if language != "auto":
         argv += ["--language", language]
+    if device != "auto":
+        argv += ["--device", device]
     if sub_lang.strip():
         argv += ["--sub-lang", sub_lang.strip()]
     argv += ["--browser", browser]
@@ -108,11 +119,21 @@ def build_download_argv(
     embed_metadata: bool = False,
     platform: str = "auto",
     browser: str = "chrome",
+    # ── 抖音列表型批量 ──
+    dy_batch: str = "none",       # none | post | like | collection | collects
+    dy_target: str = "",          # 主页链接 / sec_uid / 收藏夹 ID
+    limit: int = 0,               # 0 = 不限
+    list_only: bool = False,
+    overwrite: bool = False,
+    include_images: bool = False,
+    page_interval: int = 0,       # 0 = 用 CLI 默认值
+    batch_subdir: bool = True,    # 每个批量任务单独建子目录
+    batch_folder: str = "",       # 自定义子目录名（空 = 自动命名）
 ) -> list[str]:
     argv = [python, "media_downloader.py"]
     if len(urls) == 1:
         argv.append(urls[0])
-    else:
+    elif len(urls) > 1:
         argv += ["--file", str(media.write_list_file(urls, "gui_download_urls.txt"))]
     argv += ["--json", "-o", str(output_dir), "--kind", kind]
     if kind == "video":
@@ -130,14 +151,69 @@ def build_download_argv(
     if platform != "auto":
         argv += ["--platform", platform]
     argv += ["--browser", browser]
+
+    # ── 抖音批量目标 ──
+    target = (dy_target or "").strip()
+    if dy_batch == "post" and target:
+        argv += ["--douyin-user", target]
+    elif dy_batch == "like":
+        argv.append("--douyin-likes")
+        if target:
+            argv += ["--douyin-user", target]
+    elif dy_batch == "collection":
+        argv.append("--douyin-collection")
+    elif dy_batch == "collects" and target:
+        argv += ["--douyin-collects", target]
+
+    if limit and limit > 0:
+        argv += ["--limit", str(int(limit))]
+    if page_interval and page_interval > 0:
+        argv += ["--page-interval", str(int(page_interval))]
+    if include_images:
+        argv.append("--include-images")
+    if list_only:
+        argv.append("--list-only")
+    if overwrite:
+        argv.append("--overwrite")
+    if dy_batch and dy_batch != "none":
+        if not batch_subdir:
+            argv.append("--no-batch-subdir")
+        elif batch_folder.strip():
+            argv += ["--batch-folder", batch_folder.strip()]
     return argv
+
+
+def build_douyin_collects_argv(python: str) -> list[str]:
+    """只列出本人收藏夹及其 ID。"""
+    return [python, "media_downloader.py", "--douyin-list-collects", "--json"]
 
 
 def download_task(python: str, urls: Sequence[str], output_dir: Path, **kw) -> ProcessTask:
     argv = build_download_argv(python, urls, output_dir, **kw)
     kind_text = "音频" if kw.get("kind") == "audio" else "视频"
+    batch = kw.get("dy_batch", "none")
+    if kw.get("list_only"):
+        title = "抖音批量：预览清单"
+    elif batch and batch != "none":
+        title = f"抖音批量下载（{DY_BATCH_TITLES.get(batch, batch)}）"
+    else:
+        title = f"下载 {len(urls)} 个{kind_text}"
     return ProcessTask(argv, cwd=paths.runtime_dir(), env=env_manager.build_env(),
-                       title=f"下载 {len(urls)} 个{kind_text}", collect=True)
+                       title=title, collect=True)
+
+
+def douyin_collects_task(python: str) -> ProcessTask:
+    return ProcessTask(build_douyin_collects_argv(python), cwd=paths.runtime_dir(),
+                       env=env_manager.build_env(), title="读取抖音收藏夹列表",
+                       collect=True)
+
+
+DY_BATCH_TITLES = {
+    "post": "对方主页作品",
+    "like": "喜欢（点赞）",
+    "collection": "本人收藏",
+    "collects": "指定收藏夹",
+}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -152,6 +228,7 @@ def build_local_argv(
     language: str = "auto",
     timestamps: bool = True,
     keep_temp: bool = False,
+    device: str = "auto",
 ) -> list[str]:
     argv = [python, "transcribe_file.py"]
     if len(files) == 1:
@@ -163,6 +240,8 @@ def build_local_argv(
         argv += ["--model", model]
     if language != "auto":
         argv += ["--language", language]
+    if device != "auto":
+        argv += ["--device", device]
     if not timestamps:
         argv.append("--no-timestamps")
     if keep_temp:

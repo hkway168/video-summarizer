@@ -50,6 +50,62 @@ class BaseTab(ttk.Frame):
             return None
         return py
 
+    def cuda_libs_missing(self) -> list[str]:
+        """依据最近一次环境体检：有 CUDA 显卡但缺运行库时返回缺失的 DLL，否则空列表。
+
+        还没体检过时返回空列表（交给运行时的 cuda_libs_missing 错误兜底）。
+        """
+        rep = self.app.report
+        raw = getattr(rep, "raw", None) or {}
+        if int(raw.get("cuda_devices", -1) or -1) <= 0:
+            return []
+        return list(raw.get("cuda_libs_missing") or [])
+
+    def guide_cuda_install(self, missing: list[str] | None = None, failed: bool = False) -> bool:
+        """引导用户安装 GPU 运行库。用户同意则跳到「环境安装」页开始安装，返回 True。"""
+        missing = missing or []
+        head = ("GPU 转写失败：缺少 CUDA 运行库。" if failed
+                else "你选择了用 GPU 转写，但当前环境缺少 CUDA 运行库。")
+        detail = f"\n缺少：{', '.join(missing)}" if missing else ""
+        msg = (
+            f"{head}{detail}\n\n"
+            "需要安装 NVIDIA 的 cuBLAS / cuDNN 运行库（pip 包，约 2GB，\n"
+            "无需安装 CUDA Toolkit），装好后 GPU 转写通常比 CPU 快 5～10 倍。\n\n"
+            "是否现在前往「环境安装」页开始下载安装？\n"
+            "（选「否」可以把「计算设备」改成「自动」或「CPU」继续使用）"
+        )
+        if not messagebox.askyesno("需要安装 GPU 运行库", msg, parent=self):
+            return False
+        self.app.show_page("env")
+        env_page = self.app.pages.get("env")
+        if env_page is not None and hasattr(env_page, "install_cuda_libs_when_idle"):
+            env_page.install_cuda_libs_when_idle()
+        return True
+
+    def device_preflight(self, device: str) -> bool:
+        """开始转写前检查计算设备。返回 False 表示不要启动任务。"""
+        missing = self.cuda_libs_missing()
+        if not missing or self.console is None:
+            return True
+        if device == "cuda":
+            self.guide_cuda_install(missing)
+            return False
+        if device == "auto":
+            self.console.append("ℹ️ 检测到 NVIDIA 显卡，但缺少 CUDA 运行库，本次将用 CPU 转写（较慢）。", "warn")
+            self.console.append("    💡 到「环境安装」页点「⚡ 安装 GPU 运行库」即可启用 GPU 加速。", "info")
+        return True
+
+    def handle_cuda_libs_missing(self, errs: list[dict]) -> None:
+        """转写任务因缺 CUDA 运行库失败后的统一处理（多条错误只弹一次窗）。"""
+        if self.console is not None:
+            for e in errs:
+                self.console.append(f"❌ {e.get('url')}\n    GPU 转写缺少 CUDA 运行库", "error")
+            guide = (errs[0].get("install_guide") or {}) if errs else {}
+            if guide.get("command"):
+                self.console.append(f"    💡 手动安装命令：{guide['command']}", "info")
+        missing = list(errs[0].get("missing") or []) if errs else []
+        self.guide_cuda_install(missing, failed=True)
+
     # ── 任务管理 ────────────────────────────────────────────────────────
     def register_buttons(self, *buttons: ttk.Button) -> None:
         for b in buttons:

@@ -60,26 +60,109 @@ except ImportError:
 # 全局缓存，避免每次都重新加载模型（加载 large-v3 约 3-5 秒）
 _MODEL_CACHE: dict = {}
 
+DEVICE_CHOICES = ("auto", "cuda", "cpu")
 
-def _get_device() -> tuple[str, str]:
-    """
-    自动检测设备和计算精度。
-    RTX 4060 有 8GB 显存，可以跑 large-v3 + float16。
-    """
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return "cuda", "float16"
-    except ImportError:
-        pass
-    # 没有 torch 也可以：faster-whisper 内置用 ctranslate2
+# GPU 转写所需的 CUDA 12 运行库（pip 包，约 2GB，无需安装 CUDA Toolkit）
+CUDA_PIP_PACKAGES = ("nvidia-cublas-cu12", "nvidia-cudnn-cu12==9.*")
+CUDA_INSTALL_CMD = "pip install " + " ".join(f'"{p}"' if "*" in p else p for p in CUDA_PIP_PACKAGES)
+
+# ctranslate2 自带 cudnn64_9.dll 入口，但 ops/cnn 子库和 cuBLAS 必须另装
+_CUDA_REQUIRED_DLLS = ("cublas64_12.dll", "cublasLt64_12.dll", "cudnn_ops64_9.dll", "cudnn_cnn64_9.dll")
+
+
+class CudaLibsMissingError(RuntimeError):
+    """选择了 GPU 转写，但缺少 cuBLAS / cuDNN 运行库。"""
+
+    def __init__(self, missing: list[str]):
+        self.missing = list(missing)
+        super().__init__(
+            f"GPU 转写缺少 CUDA 运行库：{', '.join(self.missing)}\n"
+            f"请安装：{CUDA_INSTALL_CMD}\n"
+            "或把「计算设备」切换为 CPU / 自动。"
+        )
+
+
+def cuda_device_count() -> int:
     try:
         import ctranslate2
-        if ctranslate2.get_cuda_device_count() > 0:
-            return "cuda", "float16"
+        return int(ctranslate2.get_cuda_device_count())
     except Exception:
-        pass
-    return "cpu", "int8"
+        return 0
+
+
+def missing_cuda_libs() -> list[str]:
+    """返回当前进程加载不到的 CUDA 运行库 DLL 名（为空表示齐全）。"""
+    if sys.platform != "win32":
+        return []
+    import ctypes
+
+    missing: list[str] = []
+    for name in _CUDA_REQUIRED_DLLS:
+        try:
+            ctypes.WinDLL(name)
+        except OSError:
+            # CTranslate2 用系统默认搜索顺序（含 PATH，如 CUDA Toolkit 的 bin）加载，这里保持一致
+            try:
+                ctypes.WinDLL(name, winmode=0)
+            except OSError:
+                missing.append(name)
+    return missing
+
+
+def is_cuda_lib_error(msg: str) -> bool:
+    """CTranslate2 运行时报出的 "Library cublas64_12.dll is not found" 之类错误。"""
+    low = (msg or "").lower()
+    return ("cublas" in low or "cudnn" in low) and (
+        "not found" in low or "cannot be loaded" in low or "could not locate" in low
+    )
+
+
+def cuda_libs_error_entry(url: str, exc: BaseException) -> Optional[dict]:
+    """若 exc 属于 CUDA 运行库缺失，返回供 --json 输出的结构化错误，否则返回 None。"""
+    msg = str(exc)
+    if not isinstance(exc, CudaLibsMissingError) and not is_cuda_lib_error(msg):
+        return None
+    return {
+        "url": url,
+        "error_type": "cuda_libs_missing",
+        "error": msg,
+        "missing": getattr(exc, "missing", []),
+        "install_guide": {
+            "packages": list(CUDA_PIP_PACKAGES),
+            "command": CUDA_INSTALL_CMD,
+            "alternative": "改用 --device cpu（或 auto）继续转写，速度较慢",
+        },
+    }
+
+
+def resolve_device(prefer: Optional[str] = "auto", verbose: bool = True) -> tuple[str, str]:
+    """根据用户偏好（auto / cuda / cpu）确定 (device, compute_type)。
+
+    auto：有 CUDA 显卡且运行库齐全 → GPU；缺库时退回 CPU 并提示。
+    cuda：强制 GPU，没显卡抛 RuntimeError，缺库抛 CudaLibsMissingError。
+    """
+    prefer = (prefer or "auto").lower()
+    if prefer == "gpu":
+        prefer = "cuda"
+    if prefer == "cpu":
+        return "cpu", "int8"
+
+    gpus = cuda_device_count()
+    if gpus <= 0:
+        if prefer == "cuda":
+            raise RuntimeError("选择了 GPU 转写，但未检测到可用的 NVIDIA CUDA 显卡。请改用 CPU / 自动。")
+        return "cpu", "int8"
+
+    missing = missing_cuda_libs()
+    if missing:
+        if prefer == "cuda":
+            raise CudaLibsMissingError(missing)
+        if verbose:
+            print(f"[Whisper] ⚠️ 检测到 NVIDIA 显卡，但缺少 CUDA 运行库（{', '.join(missing)}），"
+                  f"本次改用 CPU 转写（较慢）。\n"
+                  f"          安装后即可启用 GPU 加速：{CUDA_INSTALL_CMD}")
+        return "cpu", "int8"
+    return "cuda", "float16"
 
 
 def _resolve_model_path(model_size: str) -> str:
@@ -98,14 +181,12 @@ def _resolve_model_path(model_size: str) -> str:
 
 def load_model(
     model_size: str = "large-v3",
-    device: Optional[str] = None,
+    device: Optional[str] = "auto",
     compute_type: Optional[str] = None,
 ) -> WhisperModel:
-    """加载 Whisper 模型（带缓存）。"""
-    if device is None or compute_type is None:
-        auto_device, auto_compute = _get_device()
-        device = device or auto_device
-        compute_type = compute_type or auto_compute
+    """加载 Whisper 模型（带缓存）。device 取值见 resolve_device。"""
+    device, auto_compute = resolve_device(device)
+    compute_type = compute_type or auto_compute
 
     key = (model_size, device, compute_type)
     if key in _MODEL_CACHE:
@@ -128,6 +209,7 @@ def transcribe(
     language: Optional[str] = None,
     initial_prompt: Optional[str] = None,
     verbose: bool = True,
+    device: Optional[str] = "auto",
 ) -> dict:
     """
     对音频执行转写。
@@ -137,6 +219,7 @@ def transcribe(
         model_size:    tiny / base / small / medium / large-v3 (默认)
         language:      None=自动检测；'zh'=中文，'en'=英文……
         initial_prompt: 提示词（有助于中文标点）
+        device:        auto（默认）/ cuda / cpu
 
     返回：
         {
@@ -149,7 +232,7 @@ def transcribe(
         }
     """
     audio_path = str(audio_path)
-    model = load_model(model_size)
+    model = load_model(model_size, device=device)
 
     start = time.time()
     segments_iter, info = model.transcribe(

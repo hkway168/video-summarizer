@@ -208,6 +208,8 @@ class EnvTab(BaseTab):
              self._install_login),
             ("🎵 安装抖音增强", "安装 f2，绕过抖音部分风控",
              lambda: self._pip_group("douyin")),
+            ("⚡ 安装 GPU 运行库", "cuBLAS / cuDNN（约 2GB），N 卡加速转写必需",
+             self.install_cuda_libs),
             ("🧹 清理下载缓存", "删除 downloads 目录下的临时音频/字幕",
              self._clean_downloads),
         ]
@@ -500,6 +502,7 @@ class EnvTab(BaseTab):
             messagebox.showerror("路径无效", f"找不到文件：\n{path}", parent=self)
             return
         self.cfg.set("python_path", path)
+        env_manager.invalidate_python_cache()
         self.console.append(f"✅ 已设置解释器：{path or '(自动)'}", "success")
         self.app.notify_env_changed()
         self.run_inspect()
@@ -512,6 +515,8 @@ class EnvTab(BaseTab):
 
         def _work(task: FuncTask) -> int:
             task.emit("🔍 正在体检运行环境（依赖 / FFmpeg / GPU / 模型）...", "info")
+            # 每次体检都重新判定，装完依赖后能立刻反映出来
+            env_manager.invalidate_python_cache()
             holder["report"] = env_manager.inspect_environment(self.cfg)
             return 0
 
@@ -519,8 +524,67 @@ class EnvTab(BaseTab):
             rep = holder.get("report")
             if rep:
                 self._render_report(rep)
+                self._warn_if_interpreter_switched(rep)
 
         self.start_task(FuncTask(_work, title="环境体检"), on_done=_done, banner=False)
+
+    def _warn_if_interpreter_switched(self, rep: env_manager.EnvReport) -> None:
+        """解释器相关的两类提示。
+
+        本机常有多个 Python（系统装的、uv/conda 建的、IDE 选的…），
+        它们各自装的包不同。不讲清楚的话，用户会看到
+        「IDE 里说缺 yt-dlp，exe 里却正常」这种前后矛盾的现象。
+        """
+        import sys as _sys
+
+        used = rep.python
+        if not used:
+            return
+
+        # ── 情况 A：当前解释器缺核心依赖，但本机另有装好的 → 提示切换 ──
+        yt = rep.get("yt_dlp")
+        if yt is not None and yt.status != "ok":
+            better = [p for p in env_manager.find_python_candidates()
+                      if env_manager.has_core_deps(p)]
+            if better:
+                self._offer_switch(used, better[0])
+                return
+
+        # ── 情况 B：程序自动换了解释器 → 说明原因，消除困惑 ──
+        if paths.is_frozen():
+            return
+        try:
+            if Path(used).resolve() == Path(_sys.executable).resolve():
+                return
+        except OSError:
+            return
+        self.console.append("ℹ️ 本程序使用的解释器，和当前运行界面的解释器不是同一个：", "info")
+        self.console.append(f"      运行界面：{_sys.executable}", "muted")
+        self.console.append(f"      实际使用：{used}", "muted")
+        self.console.append("      原因：前者没装 yt-dlp 等依赖，已自动改用装好的那个，功能不受影响。", "muted")
+
+    def _offer_switch(self, current: str, better: str) -> None:
+        """当前解释器缺依赖、而另一个装好了时，询问是否切换。"""
+        self.console.append("⚠️ 当前解释器没装 yt-dlp，但本机另一个 Python 已经装好了：", "warn")
+        self.console.append(f"      当前使用：{current}", "muted")
+        self.console.append(f"      已装好的：{better}", "success")
+        if getattr(self, "_switch_asked", False):
+            self.console.append("      可在上方「① Python 运行时」选择后点「应用」切换。", "muted")
+            return
+        self._switch_asked = True
+        if not messagebox.askyesno(
+            "发现更合适的 Python",
+            "当前使用的解释器没有安装 yt-dlp：\n"
+            f"{current}\n\n"
+            "但本机这个解释器已经装好了全部依赖：\n"
+            f"{better}\n\n"
+            "要切换到它吗？（推荐，切换后无需重复安装依赖）",
+            parent=self,
+        ):
+            self.console.append("      已保持当前解释器，可随时在「① Python 运行时」里手动切换。", "muted")
+            return
+        self.py_var.set(better)
+        self._apply_python()
 
     def _render_report(self, rep: env_manager.EnvReport) -> None:
         self.report = rep
@@ -587,10 +651,35 @@ class EnvTab(BaseTab):
                        "双击本行下载便携版 Python"),
             "model": ("前往「模型管理」下载 Whisper 模型", self._goto_models,
                       "双击本行前往「模型管理」下载"),
-            "gpu": ("安装 Whisper 依赖（GPU 检测依赖 ctranslate2）",
-                    lambda: self._pip_group("whisper"),
-                    "双击本行安装 Whisper 依赖后可再检测"),
+            "gpu": self._gpu_fix_action(),
         }
+
+    def _gpu_fix_action(self) -> tuple:
+        item = self.report.get("gpu") if self.report else None
+        if item and "缺少运行库" in (item.detail or ""):
+            return ("安装 GPU 运行库 (cuBLAS / cuDNN)", self.install_cuda_libs,
+                    "双击本行安装（约 2GB）；不装则自动用 CPU 转写")
+        return ("安装 Whisper 依赖（GPU 检测依赖 ctranslate2）",
+                lambda: self._pip_group("whisper"),
+                "双击本行安装 Whisper 依赖后可再检测")
+
+    def install_cuda_libs(self) -> None:
+        """安装 GPU 转写所需的 CUDA 运行库；其他页面引导用户时也会调用。"""
+        py = self.require_python()
+        if not py:
+            return
+        self.console.append(
+            "⚡ 开始安装 GPU 运行库：" + " ".join(env_manager.CUDA_PIP_PACKAGES)
+            + "（约 2GB，视网速需要几分钟到二十几分钟）", "step")
+        self.start_task(env_manager.install_cuda_libs_task(py, self.cfg),
+                        on_done=lambda code: self.run_inspect() if code == 0 else None)
+
+    def install_cuda_libs_when_idle(self, _tries: int = 0) -> None:
+        """从别的页面跳过来时，本页可能正在首次体检，等它结束再开始安装。"""
+        if self.busy and _tries < 120:
+            self.after(500, lambda: self.install_cuda_libs_when_idle(_tries + 1))
+            return
+        self.install_cuda_libs()
 
     def _on_row_activate(self, _event=None) -> None:
         self._fix_selected()

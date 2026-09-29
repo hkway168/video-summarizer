@@ -15,8 +15,6 @@ from urllib.parse import parse_qs, urlparse
 from .base import BaseProvider
 
 
-# 抖音"弹窗式"播放页路径（内容通过 modal_id 参数传入）
-_DOUYIN_MODAL_PATHS = ("/jingxuan", "/discover", "/user", "/hot", "/follow", "/")
 # 形如 /share/video/7613... 也统一转成标准路径
 _DOUYIN_SHARE_VIDEO_RE = re.compile(r"/share/video/(\d+)", re.IGNORECASE)
 
@@ -39,6 +37,8 @@ class DouyinProvider(BaseProvider):
     extra_ytdlp_args = [
         "--add-header", "Referer:https://www.douyin.com/",
     ]
+    # 支持「个人主页 / 收藏 / 喜欢 / 收藏夹」等聚合页展开成多条视频 URL
+    supports_batch = True
 
     def __init__(self):
         super().__init__(
@@ -50,6 +50,7 @@ class DouyinProvider(BaseProvider):
             player_clients=self.player_clients,
             needs_deno=self.needs_deno,
             extra_ytdlp_args=list(self.extra_ytdlp_args),
+            supports_batch=self.supports_batch,
         )
 
     def normalize_url(self, url: str) -> str:
@@ -57,6 +58,7 @@ class DouyinProvider(BaseProvider):
 
         支持的变体：
             https://www.douyin.com/jingxuan?modal_id=7613396176133459219
+            https://www.douyin.com/jingxuan/animal?modal_id=7613396176133459219
             https://www.douyin.com/discover?modal_id=7613396176133459219
             https://www.douyin.com/?modal_id=7613396176133459219
             https://www.douyin.com/user/MS4wL...?modal_id=7613396176133459219
@@ -87,17 +89,53 @@ class DouyinProvider(BaseProvider):
         if m:
             return f"https://www.douyin.com/video/{m.group(1)}"
 
-        # 情况 3：modal_id 型弹窗页面
-        #   路径命中白名单 或 根路径 时，从 query 中取 modal_id
-        path_norm = path.rstrip("/") or "/"
+        # 情况 3：modal_id 型弹窗页面（任意路径，如 /jingxuan/animal、/search/xxx）
         query = parse_qs(parsed.query or "")
         modal_ids = query.get("modal_id") or query.get("aweme_id")
-        if modal_ids and (
-            path_norm in _DOUYIN_MODAL_PATHS
-            or path.startswith("/user/")
-        ):
+        if modal_ids:
             aweme_id = modal_ids[0].strip()
             if aweme_id.isdigit():
                 return f"https://www.douyin.com/video/{aweme_id}"
 
         return url
+
+    # ── 列表型批量：个人主页 / 收藏 / 喜欢 / 收藏夹 ────────────────────
+    def parse_batch_target(self, target: str):
+        """识别抖音的聚合页入口，返回 douyin_list.BatchTarget 或 None。
+
+        能识别（详见 providers/douyin_list.parse_batch_target）：
+            https://www.douyin.com/user/MS4wL...                  → 主页作品
+            https://www.douyin.com/user/MS4wL...?showTab=like     → 该用户的喜欢
+            https://www.douyin.com/user/self?showTab=favorite_collection → 本人收藏
+            https://www.douyin.com/collection/7123456789          → 本人收藏夹
+            裸 sec_uid / "self" / "collection" / "like"
+        普通单视频链接（/video/xxx、带 modal_id 的弹窗页）一律返回 None。
+        """
+        from .douyin_list import parse_batch_target as _parse
+        return _parse(target)
+
+    def expand_batch(
+        self,
+        target,
+        cookies_file: str | None = None,
+        *,
+        limit: int = 0,
+        verbose: bool = False,
+        **kwargs,
+    ) -> list[str]:
+        """把 BatchTarget 展开成标准视频 URL 列表（需要 f2 + 登录 cookies）。"""
+        from .douyin_list import KIND_COLLECTS, expand_target
+
+        if target.kind == KIND_COLLECTS:
+            arg = target.collects_id
+        elif target.sec_user_id:
+            arg = target.sec_user_id
+        else:
+            # is_self 但还没解析出 sec_uid：交给 expand_target 自动识别本人
+            arg = "self"
+
+        items = expand_target(
+            target.kind, arg, cookies_file,
+            limit=limit, verbose=verbose, **kwargs,
+        )
+        return [it.url for it in items]

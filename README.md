@@ -72,15 +72,22 @@ pip install -r requirements.txt
 
 ### 3. 【推荐】启用 GPU 加速
 
-如果有 NVIDIA 显卡，额外安装 CUDA 版的 cuDNN 以获得 10 倍加速：
+如果有 NVIDIA 显卡，额外安装 CUDA 12 的 cuBLAS / cuDNN 运行库以获得 10 倍加速
+（faster-whisper 本身不带这些 DLL；无需安装 CUDA Toolkit，`transcriber.py` 会自动加载 pip 包里的 DLL）：
 
 ```powershell
-# 最简单的方式：让 faster-whisper 自己带的 CUDA 库生效
-# 实测 RTX 4060 可以直接跑 large-v3，无需额外配置
-
-# 如果报 "cuDNN missing" 错误，可以：
-pip install nvidia-cudnn-cu12==9.*
+pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*"
 ```
+
+也可以在 GUI「环境安装」页点「⚡ 安装 GPU 运行库」一键安装。
+
+计算设备可通过 GUI 的「计算设备」下拉框或命令行 `--device` 选择（`main.py` / `transcribe_file.py` 均支持）：
+
+| 取值 | 行为 |
+|---|---|
+| `auto`（默认） | 有 N 卡且运行库齐全 → GPU；缺运行库 → 自动退回 CPU 并提示 |
+| `cuda` | 强制 GPU；缺运行库时报错并引导安装（`error_type=cuda_libs_missing`） |
+| `cpu` | 强制 CPU，无需额外安装，速度较慢 |
 
 ## 🎯 使用方式
 
@@ -89,7 +96,10 @@ pip install nvidia-cudnn-cu12==9.*
 双击 **`VideoSummarizer.exe`**，在界面上即可完成：
 
 - 🎬 **一键转写**：选平台 + 粘链接（支持多行批量）+ 选模式/模型，链接直接变文字稿
-- ⬇️ **视频下载**：**只下载不转写** —— 视频/仅音频、画质上限、MP4/MKV、可带字幕与封面
+- ⬇️ **视频下载**：**只下载不转写** —— 视频/仅音频、画质上限、MP4/MKV、可带字幕与封面；
+  还支持 **抖音批量**（对方主页全部作品、本人收藏 / 喜欢 / 收藏夹，可先预览清单）——
+  独立卡片、独立的「⬇ 开始批量下载」按钮，与上方链接下载互不影响；
+  每个批量任务默认存进单独的子文件夹（如 `videos/抖音_张三_主页作品/`），分类清晰
 - 📁 **本地转写**：**只转写不下载** —— 选本地音视频文件或整个目录，离线转文字（视频自动抽音轨）
 - 📦 **模型管理**：Whisper 模型下载（镜像加速、断点续传）/ 删除 / 查看占用
 - 📄 **输出管理**：文字稿列表、搜索、预览、一键复制给 AI、另存、删除
@@ -158,6 +168,17 @@ python media_downloader.py "<URL>" --kind audio --audio-format mp3  # 只要 mp3
 python media_downloader.py --file urls.txt -o D:\videos             # 批量
 python media_downloader.py "<URL>" --thumbnail --embed-metadata     # 带封面和元数据
 
+# ── 抖音批量：把主页 / 收藏 / 喜欢 展开成一堆视频再逐个下 ──────
+python media_downloader.py "https://www.douyin.com/user/MS4wL..." -o D:\videos  # 对方主页全部作品
+python media_downloader.py --douyin-collection -o D:\videos         # 本人收藏
+python media_downloader.py --douyin-likes -n 50 -o D:\videos        # 本人喜欢（最新 50 个）
+python media_downloader.py --douyin-list-collects                   # 列出本人收藏夹及 ID
+python media_downloader.py --douyin-collects 7123456789 -o D:\videos  # 下某个收藏夹
+python media_downloader.py --douyin-collection --list-only          # 先看清单不下载
+# 默认每个批量任务存进独立子目录，如 D:\videos\抖音_本人收藏\
+python media_downloader.py --douyin-collects 7123456789 --batch-folder "抖音_收藏夹_美食" -o D:\videos  # 自定义子目录名
+python media_downloader.py --douyin-collection --no-batch-subdir -o D:\videos  # 不建子目录，平铺
+
 # ── 只转写本地文件，不联网 ─────────────────────────────────
 python transcribe_file.py D:\videos\a.mp4                  # 单个文件
 python transcribe_file.py a.mp4 b.m4a c.mkv --model medium  # 多个文件
@@ -166,7 +187,10 @@ python transcribe_file.py a.mp4 --language zh --json        # 指定语言 + 结
 ```
 
 `media_downloader.py` 复用了主流程的 cookies 降级链、平台识别和抖音 f2 增强通路，
-所以登录能力与支持平台跟 `main.py` 完全一致；
+所以登录能力与支持平台跟 `main.py` 完全一致。
+其中**抖音批量**（主页 / 收藏 / 喜欢 / 收藏夹）需要 f2 + 扫码登录，
+默认按批量任务分子目录保存（`抖音_<昵称>_主页作品` / `抖音_本人收藏` / `抖音_本人喜欢` / `抖音_收藏夹_<名称或ID>`），
+同一来源重复执行落到同一目录、已下载的自动跳过，详见 [USAGE.md 7.3 节](USAGE.md)；
 `transcribe_file.py` 会先用 FFmpeg 把视频抽成 16kHz 单声道音轨再交给 Whisper，
 输出的 `*.transcript.md` 与主流程同构。
 

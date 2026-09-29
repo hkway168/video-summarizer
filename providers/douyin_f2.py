@@ -104,33 +104,72 @@ def _load_cookie_header(cookies_file: str | Path) -> str:
     return "; ".join(parts)
 
 
-def _build_handler_kwargs(cookie_header: str) -> dict:
-    """组装 f2 DouyinHandler 需要的 kwargs。"""
+def f2_user_agent() -> str:
+    """f2 自带配置里的 UA。
+
+    **必须与 f2 一致**：f2 生成 a_bogus 签名时会把浏览器信息
+    （browser_name / browser_version，取自它自己的 conf，默认 Edge/130）
+    写进查询参数，而签名又基于 UA 计算。如果我们把 header 里的 UA 换成别的，
+    签名和 UA 就对不上——列表类接口（收藏/喜欢/主页）会直接返回
+    **HTTP 200 但响应体为空**，且没有任何错误信息，极难排查。
+    """
+    try:
+        from f2.apps.douyin.utils import ClientConfManager
+
+        ua = ClientConfManager.user_agent()
+        if ua:
+            return ua
+    except Exception:
+        pass
+    return _DEFAULT_UA
+
+
+def _build_handler_kwargs(
+    cookie_header: str,
+    *,
+    timeout: int = 30,
+    page_counts: int = 20,
+) -> dict:
+    """组装 f2 DouyinHandler 需要的 kwargs。
+
+    注意 `timeout` 在 f2 里有双重语义：
+        1) httpx 请求超时；
+        2) **列表分页之间的 sleep 秒数**（见 handler.fetch_user_* 末尾的
+           `await asyncio.sleep(self.kwargs.get("timeout", 5))`）。
+    因此单视频探测可以用较大的 30，而列表抓取必须调小（否则每翻一页干等 30 秒）。
+    """
     return {
         "cookie": cookie_header,
         "headers": {
-            "User-Agent": _DEFAULT_UA,
+            # 用 f2 自己的 UA，保证与它生成的 a_bogus 签名参数匹配
+            "User-Agent": f2_user_agent(),
             "Referer": "https://www.douyin.com/",
         },
-        "timeout": 30,
+        "timeout": timeout,
         "max_retries": 3,
         "max_connections": 5,
         "max_counts": 0,
         "max_tasks": 5,
-        "page_counts": 20,
+        "page_counts": page_counts,
         "naming": "{create}_{desc}",
         "path": "./downloads",
         "proxies": {"http://": None, "https://": None},
     }
 
 
-def _make_handler(cookie_header: str) -> "DouyinHandler":
+def _make_handler(
+    cookie_header: str,
+    *,
+    timeout: int = 30,
+    page_counts: int = 20,
+) -> "DouyinHandler":
     """构造 DouyinHandler 并关闭 Bark 通知（避免网络噪音）。"""
     if not is_available():
         raise F2NotAvailableError(f"f2 未安装或导入失败：{_F2_IMPORT_ERROR}")
     _silence_f2_logs()
-    handler = DouyinHandler(_build_handler_kwargs(cookie_header))
-    # 我们只用到 fetch_one_video，一律关闭 Bark 通知
+    handler = DouyinHandler(_build_handler_kwargs(
+        cookie_header, timeout=timeout, page_counts=page_counts))
+    # 我们只用 fetch_* 系列读接口，一律关闭 Bark 通知
     try:
         handler.enable_bark = False
     except Exception:
@@ -229,12 +268,19 @@ def f2_download_video(
     out_dir: Path,
     cookies_file: Optional[str | Path] = None,
     verbose: bool = False,
+    skip_existing: bool = True,
 ) -> dict:
     """
     根据 f2 探到的 play_url 直接下载视频文件（含音轨，.mp4 为主）。
 
+    Args:
+        skip_existing: 目标文件已存在且非空时直接复用（批量下载时增量补全的关键；
+                       yt-dlp 自带该行为，f2 通路需要自己做）。
+
     返回 dict 与 downloader.download_audio 同构：
         audio_path / title / duration / uploader / url / video_id / description
+    额外字段：
+        skipped —— True 表示命中已存在的文件、没有实际发起下载
 
     注：抖音 `video_play_addr` 给的是 h264 mp4 + aac 音轨的"视频文件"，
     不是纯音频，但 Whisper 内部用 ffmpeg 解码，有音轨就够用了。
@@ -245,16 +291,42 @@ def f2_download_video(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    play_url = meta.get("_f2_play_url")
-    if not play_url:
-        raise RuntimeError("f2 元数据里没有 video_play_addr，无法下载")
-
     title = meta.get("title") or "douyin_video"
     video_id = meta.get("video_id") or "unknown"
     safe_title = meta.get("safe_title") or _safe_filename(title)
 
     # 抖音 play_url 多为 mp4
     out_path = out_dir / f"{safe_title}_{video_id}.mp4"
+
+    def _result(skipped: bool) -> dict:
+        return {
+            "audio_path": str(out_path),
+            "title": title,
+            "duration": meta.get("duration", 0),
+            "uploader": meta.get("uploader", ""),
+            "url": url,
+            "video_id": video_id,
+            "description": (meta.get("description") or "")[:500],
+            "skipped": skipped,
+        }
+
+    # ── 已存在则跳过（按 video_id 匹配，标题变化也能命中）──────────────
+    if skip_existing:
+        existing = out_path if (out_path.exists() and out_path.stat().st_size > 0) else None
+        if existing is None:
+            for p in out_dir.glob(f"*_{video_id}.*"):
+                if p.is_file() and p.stat().st_size > 0 and p.suffix.lower() not in (".part", ".ytdl", ".temp"):
+                    existing = p
+                    break
+        if existing is not None:
+            out_path = existing
+            if verbose:
+                print(f"    [f2] 已存在，跳过下载：{existing.name}")
+            return _result(True)
+
+    play_url = meta.get("_f2_play_url")
+    if not play_url:
+        raise RuntimeError("f2 元数据里没有 video_play_addr，无法下载")
 
     # 请求头必须带 Referer，否则 CDN 经常 403
     headers = {
@@ -271,30 +343,33 @@ def f2_download_video(
     if verbose:
         print(f"    [f2] 开始下载视频文件: {play_url[:100]}...")
 
-    # 流式下载 + 简单进度
+    # 先写 .part 再改名：中断时不会留下"看起来已下载完"的半截文件，
+    # 否则批量场景下 skip_existing 会把坏文件当成功产物跳过。
+    part_path = out_path.with_suffix(out_path.suffix + ".part")
     total_bytes = 0
-    with httpx.stream("GET", play_url, headers=headers, timeout=60.0, follow_redirects=True) as resp:
-        resp.raise_for_status()
-        expected = int(resp.headers.get("content-length") or 0)
-        with open(out_path, "wb") as f:
-            for chunk in resp.iter_bytes(chunk_size=64 * 1024):
-                if not chunk:
-                    continue
-                f.write(chunk)
-                total_bytes += len(chunk)
-                if verbose and expected:
-                    pct = total_bytes * 100.0 / expected
-                    # 简单原地刷新
-                    print(f"\r    [f2] 下载进度 {pct:5.1f}%  ({total_bytes/1024/1024:6.2f} / {expected/1024/1024:6.2f} MiB)", end="")
-    if verbose:
-        print()  # 换行
+    try:
+        with httpx.stream("GET", play_url, headers=headers, timeout=60.0,
+                          follow_redirects=True) as resp:
+            resp.raise_for_status()
+            expected = int(resp.headers.get("content-length") or 0)
+            with open(part_path, "wb") as f:
+                for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    total_bytes += len(chunk)
+                    if verbose and expected:
+                        pct = total_bytes * 100.0 / expected
+                        # 简单原地刷新
+                        print(f"\r    [f2] 下载进度 {pct:5.1f}%  ({total_bytes/1024/1024:6.2f} / {expected/1024/1024:6.2f} MiB)", end="")
+        if verbose:
+            print()  # 换行
+        if total_bytes <= 0:
+            raise RuntimeError("下载到 0 字节，可能直链已过期或被风控拦截")
+        out_path.unlink(missing_ok=True)
+        part_path.replace(out_path)
+    except BaseException:
+        part_path.unlink(missing_ok=True)
+        raise
 
-    return {
-        "audio_path": str(out_path),
-        "title": title,
-        "duration": meta.get("duration", 0),
-        "uploader": meta.get("uploader", ""),
-        "url": url,
-        "video_id": video_id,
-        "description": (meta.get("description") or "")[:500],
-    }
+    return _result(False)

@@ -124,6 +124,13 @@ class LocalTab(BaseTab):
         self.ts_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(grid, text="输出带时间戳的段落",
                         variable=self.ts_var).grid(row=0, column=4, sticky="w", padx=(18, 0), pady=5)
+
+        ttk.Label(grid, text="计算设备", style="Card.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=5)
+        self.device_var = tk.StringVar()
+        cb_device = ttk.Combobox(grid, textvariable=self.device_var, state="readonly",
+                                 values=_labels(jobs.DEVICES), width=34)
+        cb_device.grid(row=1, column=1, sticky="ew", pady=5, padx=(0, 18))
+        cb_device.bind("<<ComboboxSelected>>", self._on_device_selected)
         grid.columnconfigure(1, weight=1)
 
         orow = ttk.Frame(opt, style="Card.TFrame")
@@ -266,6 +273,7 @@ class LocalTab(BaseTab):
     # ══════════════════════════════════════════════════════════════════
     def _load_config(self) -> None:
         self.lang_var.set(_label_of(LANGUAGES, self.cfg.get("local_language")))
+        self.device_var.set(_label_of(jobs.DEVICES, self.cfg.get("device")))
         self.ts_var.set(bool(self.cfg.get("local_timestamps")))
         self.recursive_var.set(bool(self.cfg.get("local_recursive")))
         self.out_var.set(str(self.cfg.output_dir()))
@@ -280,6 +288,7 @@ class LocalTab(BaseTab):
         self.cfg.update({
             "local_model": self._model_value(),
             "local_language": _value_of(LANGUAGES, self.lang_var.get(), "auto"),
+            "device": self._device_value(),
             "local_timestamps": bool(self.ts_var.get()),
             "local_recursive": bool(self.recursive_var.get()),
             "local_files": [str(f.path) for f in self.files],
@@ -305,6 +314,17 @@ class LocalTab(BaseTab):
             return "auto"
         return label.split("（")[0]
 
+    def _device_value(self) -> str:
+        return _value_of(jobs.DEVICES, self.device_var.get(), "auto")
+
+    def _on_device_selected(self, _e=None) -> None:
+        device = self._device_value()
+        self.cfg.set("device", device)
+        if device == "cuda":
+            missing = self.cuda_libs_missing()
+            if missing:
+                self.guide_cuda_install(missing)
+
     def _output_dir(self) -> Path:
         raw = self.out_var.get().strip()
         return Path(raw) if raw else paths.default_output_dir()
@@ -320,6 +340,7 @@ class LocalTab(BaseTab):
         super().on_show()
         self.refresh_models()
         self.out_var.set(str(self.cfg.output_dir()))
+        self.device_var.set(_label_of(jobs.DEVICES, self.cfg.get("device")))
 
     def on_first_show(self) -> None:
         self.console.append("💡 本地转写完全离线，不会访问网络。", "step")
@@ -359,7 +380,7 @@ class LocalTab(BaseTab):
             ):
                 self.app.show_page("env")
                 return False
-        return True
+        return self.device_preflight(self._device_value())
 
     def _start(self) -> None:
         if not self.files:
@@ -392,6 +413,7 @@ class LocalTab(BaseTab):
             model=self._model_value(),
             language=_value_of(LANGUAGES, self.lang_var.get(), "auto"),
             timestamps=bool(self.ts_var.get()),
+            device=self._device_value(),
         )
         total = paths.fmt_bytes(media.total_bytes(self.files))
         self.console.append(f"🎙 共 {len(self.files)} 个文件（{total}），输出到：{out_dir}", "step")
@@ -416,6 +438,11 @@ class LocalTab(BaseTab):
                     f"    · {r.get('title')}  {r.get('char_count', 0)} 字  "
                     f"用时 {r.get('elapsed', 0):.1f}s\n      → {r.get('md_path')}", "success")
             self.console.append("🎉 完成！到「输出管理」页可预览并一键复制给 AI 总结。", "step")
+
+        cuda_errs = [e for e in errs if e.get("error_type") == "cuda_libs_missing"]
+        errs = [e for e in errs if e.get("error_type") != "cuda_libs_missing"]
+        if cuda_errs:
+            self.handle_cuda_libs_missing(cuda_errs)
 
         for e in errs:
             if e.get("error_type") == "whisper_required":

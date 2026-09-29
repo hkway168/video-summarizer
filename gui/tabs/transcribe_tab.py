@@ -162,6 +162,12 @@ class TranscribeTab(BaseTab):
         e_sub = ttk.Entry(grid, textvariable=self.sub_lang_var, width=18)
         add_row(2, 1, "字幕语言", e_sub, "可留空，如 zh-Hans / en")
 
+        self.device_var = tk.StringVar()
+        cb_device = ttk.Combobox(grid, textvariable=self.device_var, state="readonly",
+                                 values=_labels(jobs.DEVICES), width=34)
+        add_row(3, 0, "计算设备", cb_device)
+        cb_device.bind("<<ComboboxSelected>>", self._on_device_selected)
+
         grid.columnconfigure(1, weight=1)
         grid.columnconfigure(4, weight=1)
 
@@ -240,6 +246,7 @@ class TranscribeTab(BaseTab):
         self.platform_var.set(_label_of(PLATFORMS, self.cfg.get("platform")))
         self.mode_var.set(_label_of(MODES, self.cfg.get("mode")))
         self.lang_var.set(_label_of(LANGUAGES, self.cfg.get("language")))
+        self.device_var.set(_label_of(jobs.DEVICES, self.cfg.get("device")))
         self.browser_var.set(_label_of(BROWSERS, self.cfg.get("browser")))
         self.sub_lang_var.set(self.cfg.get("sub_lang") or "")
         self.keep_audio_var.set(bool(self.cfg.get("keep_audio")))
@@ -257,6 +264,7 @@ class TranscribeTab(BaseTab):
             "platform": _value_of(PLATFORMS, self.platform_var.get(), "auto"),
             "mode": _value_of(MODES, self.mode_var.get(), "auto"),
             "language": _value_of(LANGUAGES, self.lang_var.get(), "auto"),
+            "device": self._device_value(),
             "browser": _value_of(BROWSERS, self.browser_var.get(), "chrome"),
             "sub_lang": self.sub_lang_var.get().strip(),
             "keep_audio": bool(self.keep_audio_var.get()),
@@ -287,6 +295,17 @@ class TranscribeTab(BaseTab):
             return "auto"
         return label.split("（")[0]
 
+    def _device_value(self) -> str:
+        return _value_of(jobs.DEVICES, self.device_var.get(), "auto")
+
+    def _on_device_selected(self, _e=None) -> None:
+        device = self._device_value()
+        self.cfg.set("device", device)
+        if device == "cuda":
+            missing = self.cuda_libs_missing()
+            if missing:
+                self.guide_cuda_install(missing)
+
     def _output_dir(self) -> Path:
         raw = self.out_var.get().strip()
         return Path(raw) if raw else paths.default_output_dir()
@@ -301,6 +320,7 @@ class TranscribeTab(BaseTab):
     def on_show(self) -> None:
         super().on_show()
         self.refresh_models()
+        self.device_var.set(_label_of(jobs.DEVICES, self.cfg.get("device")))
 
     def on_first_show(self) -> None:
         self.console.append("👋 本页是「一键流程」：粘贴链接 → 点「▶ 开始转写」，直接拿文字稿。", "step")
@@ -335,7 +355,7 @@ class TranscribeTab(BaseTab):
             ):
                 self.app.show_page("env")
                 return False
-        return True
+        return self.device_preflight(self._device_value())
 
     def _send_to_download(self) -> None:
         """把当前链接交给「视频下载」页（只下载、不转写）。"""
@@ -380,6 +400,7 @@ class TranscribeTab(BaseTab):
             sub_lang=self.sub_lang_var.get().strip(),
             keep_audio=bool(self.keep_audio_var.get()),
             no_auto_sub=bool(self.no_auto_sub_var.get()),
+            device=self._device_value(),
         )
         self.console.append(f"🎬 共 {len(urls)} 个链接，输出目录：{self._output_dir()}", "step")
         self.start_task(task, on_done=lambda code: self._on_finished(task, code))
@@ -409,14 +430,19 @@ class TranscribeTab(BaseTab):
             if self.auto_open_var.get():
                 paths.open_file(ok_list[0].get("md_path", ""))
 
+        cuda_errs: list[dict] = []
         for e in err_list:
             etype = e.get("error_type")
             if etype == "whisper_required":
                 self._handle_whisper_required(e)
             elif etype == "login_required":
                 self._handle_login_required(e)
+            elif etype == "cuda_libs_missing":
+                cuda_errs.append(e)
             else:
                 self.console.append(f"❌ {e.get('url')}\n    {e.get('error')}", "error")
+        if cuda_errs:
+            self.handle_cuda_libs_missing(cuda_errs)
 
         if ok_list and not err_list:
             self.console.append("🎉 全部完成！可到「输出管理」页查看/复制文字稿，"

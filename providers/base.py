@@ -30,6 +30,9 @@ class BaseProvider:
                             非 YouTube 平台留空即可，yt-dlp 会忽略该参数）
         needs_deno:         是否需要 deno JS runtime（仅 YouTube n-sig 需要）
         extra_ytdlp_args:   额外追加到 yt-dlp 命令行的参数（比如抖音可能需要 Referer）
+        supports_batch:     是否支持「列表型目标展开」（个人主页 / 收藏 / 喜欢 等
+                            一个入口对应多个视频的聚合页）。为 True 时上层会调用
+                            parse_batch_target() + expand_batch() 把入口展开成多条 URL。
     """
     name: str = "base"
     display_name: str = "Base"
@@ -39,6 +42,7 @@ class BaseProvider:
     player_clients: Optional[str] = None
     needs_deno: bool = False
     extra_ytdlp_args: List[str] = field(default_factory=list)
+    supports_batch: bool = False
 
     def match(self, url: str) -> bool:
         """判断该 URL 是否属于本平台。"""
@@ -56,3 +60,30 @@ class BaseProvider:
         （例如抖音的 /jingxuan?modal_id=XXX → /video/XXX）。
         """
         return url
+
+    # ── 列表型批量（可选能力）────────────────────────────────────────
+    def parse_batch_target(self, target: str):
+        """判断 target 是否是「一个入口对应多个视频」的聚合页。
+
+        返回平台自定义的目标描述对象（真值）表示是批量入口；
+        返回 None 表示这是普通单视频链接，按原链路处理。
+        默认所有平台都不支持，返回 None。
+        """
+        return None
+
+    def expand_batch(
+        self,
+        target,
+        cookies_file: Optional[str] = None,
+        *,
+        limit: int = 0,
+        verbose: bool = False,
+        **kwargs,
+    ) -> List[str]:
+        """把 parse_batch_target() 的结果展开成一串标准视频 URL。
+
+        子类在 supports_batch=True 时必须实现。默认抛 NotImplementedError。
+        """
+        raise NotImplementedError(
+            f"{self.display_name} 暂不支持列表型批量下载"
+        )

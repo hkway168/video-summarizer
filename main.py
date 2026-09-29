@@ -59,6 +59,15 @@ class WhisperNotReadyError(RuntimeError):
         )
 
 
+def _cuda_libs_error_entry(url: str, exc: BaseException) -> dict | None:
+    """GPU 缺 CUDA 运行库 → 结构化错误（error_type=cuda_libs_missing），否则 None。"""
+    try:
+        from transcriber import cuda_libs_error_entry
+    except Exception:
+        return None
+    return cuda_libs_error_entry(url, exc)
+
+
 class LoginRequiredError(RuntimeError):
     """B 站 / 抖音等平台缺少有效登录 cookies 导致下载失败时抛出。
 
@@ -338,6 +347,7 @@ def process_one(
     sub_lang: str | None = None,   # 用户指定字幕语言，如 "zh-Hans"
     allow_auto_sub: bool = True,   # 是否允许回退到 YouTube 自动字幕
     platform: str | None = None,   # 强制指定平台
+    device: str = "auto",          # Whisper 计算设备：auto | cuda | cpu
 ) -> dict:
     """
     处理一个 URL：元数据 → 优先字幕，失败回退 Whisper → 写 transcript.md
@@ -464,12 +474,13 @@ def process_one(
         )
         print(f"    ✓ 音频: {dl_meta['audio_path']}")
 
-        print("\n[3/3] 🎙️  Whisper 转写（GPU 加速）...")
+        print("\n[3/3] 🎙️  Whisper 转写...")
         w_result = transcribe(
             dl_meta["audio_path"],
             model_size=model_size,
             language=language,
             verbose=True,
+            device=device,
         )
         transcript_text = w_result["full_text"]
         timed_text = w_result["timed_text"]
@@ -576,6 +587,9 @@ def main():
                         help="列出本地已安装的 Whisper 模型并退出")
     parser.add_argument("--keep-audio", action="store_true", help="保留下载的音频文件")
     parser.add_argument("--language", "-l", default=None, help="强制指定语言 (如 zh/en)，默认自动检测")
+    parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"],
+                        help="Whisper 计算设备：auto=有 GPU 且 CUDA 库齐全时用 GPU，否则 CPU（默认）"
+                             " | cuda=强制 GPU | cpu=强制 CPU")
     parser.add_argument("--browser", "-b", default=None,
                         help="从哪个浏览器读取 cookies: chrome/firefox/edge/brave 等。默认 chrome。传 'none' 禁用")
     parser.add_argument("--cookies-file", default=None,
@@ -655,6 +669,7 @@ def main():
                 sub_lang=args.sub_lang,
                 allow_auto_sub=not args.no_auto_sub,
                 platform=args.platform,
+                device=args.device,
             )
             results.append(result)
         except WhisperNotReadyError as e:
@@ -691,6 +706,11 @@ def main():
             ))
         except Exception as e:
             err_msg = str(e)
+            cuda_entry = _cuda_libs_error_entry(url, e)
+            if cuda_entry:
+                print(f"\n❌ GPU 转写失败（缺少 CUDA 运行库）: {url}\n   {err_msg}")
+                errors.append(cuda_entry)
+                continue
             # 启发式升级：B 站 / 抖音等平台如果命中「需要登录」特征，
             # 转换为结构化 login_required 错误，便于 Agent 引导用户扫码登录
             inferred_platform = _infer_platform_from_url(url, explicit=args.platform)

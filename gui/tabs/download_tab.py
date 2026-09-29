@@ -62,9 +62,36 @@ BROWSERS = [
     ("Brave", "brave"), ("不读取浏览器 cookies", "none"),
 ]
 
+# 抖音「列表型批量」：一个入口展开成一堆视频（独立于上方链接下载）
+DY_BATCHES = [
+    ("对方个人主页的全部作品", "post"),
+    ("喜欢（点赞）列表", "like"),
+    ("本人的收藏", "collection"),
+    ("本人的某个收藏夹", "collects"),
+]
+
+# 每种批量类型对「目标」输入框的要求
+DY_TARGET_SPEC = {
+    "post": ("对方主页", "粘贴对方主页链接，如 https://www.douyin.com/user/MS4wLjABAAAA…", True),
+    "like": ("谁的点赞", "留空 = 本人；填对方主页链接 = 下载对方公开的点赞", False),
+    "collection": ("无需填写", "收藏列表只能读取本人账号，无需填写", False),
+    "collects": ("收藏夹 ID", "点右侧「列出我的收藏夹」获取 ID", True),
+}
+
+DY_LIMITS = [
+    ("不限（全部）", 0),
+    ("最新 10 个", 10),
+    ("最新 30 个", 30),
+    ("最新 50 个", 50),
+    ("最新 100 个", 100),
+    ("最新 200 个", 200),
+]
+
 URL_PLACEHOLDER = ("在这里粘贴要下载的视频链接，一行一个可批量下载，例如：\n"
                    "https://www.bilibili.com/video/BV1xx411c7mD/\n"
-                   "https://www.youtube.com/watch?v=xxxxxxxxxxx")
+                   "https://www.youtube.com/watch?v=xxxxxxxxxxx\n"
+                   "抖音主页链接会自动展开为该用户的全部作品：\n"
+                   "https://www.douyin.com/user/MS4wLjABAAAA...")
 
 
 def _labels(pairs) -> list[str]:
@@ -131,6 +158,8 @@ class DownloadTab(BaseTab):
         self.count_var = tk.StringVar(value="")
         ttk.Label(row, textvariable=self.count_var, style="Muted.TLabel").pack(side="left", padx=(12, 0))
         self.register_buttons(self.btn_start, b_clear, b_paste)
+
+        self._build_douyin_batch()
 
         # ── 下载参数 ──
         opt = card(self)
@@ -222,6 +251,121 @@ class DownloadTab(BaseTab):
         self.progress = ttk.Progressbar(self, mode="determinate")
         self.progress.pack(fill="x", pady=(8, 0))
 
+    # ══════════════════════════════════════════════════════════════════
+    def _build_douyin_batch(self) -> None:
+        """「抖音批量」区块：把主页 / 收藏 / 喜欢 展开成一堆视频再逐个下载。"""
+        box = card(self)
+        box.pack(fill="x", pady=(12, 0))
+        card_title(box, "抖音批量下载",
+                   "与上方链接下载互相独立：选好来源点本区的「开始批量下载」，就能把对方主页全部作品、"
+                   "或自己的收藏 / 喜欢一次性下完。需要先在「环境安装」页扫码登录抖音。"
+                   ).pack(fill="x", anchor="w")
+
+        r1 = ttk.Frame(box, style="Card.TFrame")
+        r1.pack(fill="x", pady=(10, 0))
+        ttk.Label(r1, text="批量来源", style="Card.TLabel").pack(side="left", padx=(0, 8))
+        self.dy_batch_var = tk.StringVar()
+        cb_batch = ttk.Combobox(r1, textvariable=self.dy_batch_var, state="readonly",
+                                values=_labels(DY_BATCHES), width=26)
+        cb_batch.bind("<<ComboboxSelected>>", lambda e: self._sync_douyin())
+        cb_batch.pack(side="left")
+
+        ttk.Label(r1, text="数量", style="Card.TLabel").pack(side="left", padx=(16, 8))
+        self.dy_limit_var = tk.StringVar()
+        self.cb_dy_limit = ttk.Combobox(r1, textvariable=self.dy_limit_var, state="readonly",
+                                        values=_labels(DY_LIMITS), width=14)
+        self.cb_dy_limit.pack(side="left")
+
+        ttk.Label(r1, text="翻页间隔", style="Card.TLabel").pack(side="left", padx=(16, 8))
+        self.dy_interval_var = tk.StringVar(value="8")
+        self.sp_dy_interval = ttk.Spinbox(r1, from_=0, to=60, width=5,
+                                          textvariable=self.dy_interval_var)
+        self.sp_dy_interval.pack(side="left")
+        ttk.Label(r1, text="秒（太小容易被风控）", style="Muted.TLabel").pack(side="left", padx=(6, 0))
+
+        r2 = ttk.Frame(box, style="Card.TFrame")
+        r2.pack(fill="x", pady=(8, 0))
+        self.dy_target_label = ttk.Label(r2, text="目标", style="Card.TLabel", width=9)
+        self.dy_target_label.pack(side="left", padx=(0, 8))
+        self.dy_target_var = tk.StringVar()
+        self.ent_dy_target = ttk.Entry(r2, textvariable=self.dy_target_var)
+        self.ent_dy_target.pack(side="left", fill="x", expand=True)
+        self.btn_dy_collects = ttk.Button(r2, text="列出我的收藏夹", width=15,
+                                          command=self._list_collects)
+        self.btn_dy_collects.pack(side="left", padx=(6, 0))
+
+        self.dy_hint_var = tk.StringVar(value="")
+        ttk.Label(box, textvariable=self.dy_hint_var, style="Muted.TLabel",
+                  wraplength=940, justify="left").pack(anchor="w", pady=(6, 0))
+
+        r3 = ttk.Frame(box, style="Card.TFrame")
+        r3.pack(fill="x", pady=(8, 0))
+        self.dy_images_var = tk.BooleanVar()
+        self.dy_overwrite_var = tk.BooleanVar()
+        ttk.Checkbutton(r3, text="包含图文/图集作品", variable=self.dy_images_var).pack(side="left")
+        ttk.Checkbutton(r3, text="已存在的文件也重新下载", variable=self.dy_overwrite_var
+                        ).pack(side="left", padx=(16, 0))
+        self.dy_subdir_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(r3, text="每个批量任务单独建文件夹", variable=self.dy_subdir_var
+                        ).pack(side="left", padx=(16, 0))
+        ttk.Label(r3, text="如 抖音_某某_主页作品 / 抖音_本人收藏 / 抖音_收藏夹_名称",
+                  style="Muted.TLabel").pack(side="left", padx=(8, 0))
+
+        r4 = ttk.Frame(box, style="Card.TFrame")
+        r4.pack(fill="x", pady=(10, 0))
+        self.btn_dy_start = ttk.Button(r4, text="⬇ 开始批量下载", style="Accent.TButton",
+                                       command=self._start_batch)
+        self.btn_dy_start.pack(side="left")
+        ttk.Button(r4, text="■ 停止", style="Danger.TButton",
+                   command=self.stop_task).pack(side="left", padx=(8, 0))
+        self.btn_dy_preview = ttk.Button(r4, text="👁 先预览清单（不下载）",
+                                         command=self._preview_batch)
+        self.btn_dy_preview.pack(side="left", padx=(8, 0))
+        ttk.Label(r4, text="画质 / 格式 / 保存目录沿用下方「下载参数」",
+                  style="Muted.TLabel").pack(side="left", padx=(12, 0))
+        self.register_buttons(self.btn_dy_collects, self.btn_dy_start, self.btn_dy_preview)
+
+    def set_busy(self, flag: bool) -> None:
+        self._is_busy = flag
+        super().set_busy(flag)
+        if not flag:
+            self._sync_douyin()
+
+    def _dy_batch(self) -> str:
+        return _value_of(DY_BATCHES, self.dy_batch_var.get(), "post")
+
+    def _dy_limit(self) -> int:
+        for text, val in DY_LIMITS:
+            if text == self.dy_limit_var.get():
+                return int(val)
+        return 0
+
+    def _dy_interval(self) -> int:
+        try:
+            return max(0, int(self.dy_interval_var.get() or 8))
+        except ValueError:
+            return 8
+
+    def _sync_douyin(self) -> None:
+        """按批量来源启停「目标」输入框，并给出对应提示。"""
+        batch = self._dy_batch()
+        label, hint, required = DY_TARGET_SPEC.get(batch, ("", "", False))
+
+        self.dy_target_label.configure(text=label or "目标")
+        self.ent_dy_target.configure(state="disabled" if batch == "collection" else "normal")
+        if not getattr(self, "_is_busy", False):
+            self.btn_dy_collects.configure(
+                state="normal" if batch == "collects" else "disabled")
+
+        if batch == "like":
+            self.dy_hint_var.set(
+                f"{hint}\n⚠️ 抖音默认隐藏点赞列表：下载本人的需先在 APP「我 → 设置 → "
+                "隐私设置 → 点赞列表」改为公开；对方未公开时读不到。")
+        elif batch == "collection":
+            self.dy_hint_var.set(f"{hint}\n收藏接口只靠 cookie 鉴权，因此只能是当前登录的本人账号。")
+        else:
+            self.dy_hint_var.set(hint + ("　（必填）" if required else ""))
+
     # ── 占位符 / 链接 ──────────────────────────────────────────────────
     def _show_placeholder(self) -> None:
         self.url_text.delete("1.0", "end")
@@ -293,6 +437,16 @@ class DownloadTab(BaseTab):
         if last.strip():
             self.set_urls([l for l in last.splitlines() if l.strip()])
 
+        # 抖音批量
+        self.dy_batch_var.set(_label_of(DY_BATCHES, self.cfg.get("dy_batch") or "post"))
+        self.dy_limit_var.set(_label_of(DY_LIMITS, int(self.cfg.get("dy_limit") or 0)))
+        self.dy_target_var.set(str(self.cfg.get("dy_target") or ""))
+        self.dy_interval_var.set(str(self.cfg.get("dy_page_interval") or 8))
+        self.dy_images_var.set(bool(self.cfg.get("dy_include_images")))
+        self.dy_overwrite_var.set(bool(self.cfg.get("dy_overwrite")))
+        self.dy_subdir_var.set(bool(self.cfg.get("dy_batch_subdir", True)))
+        self._sync_douyin()
+
     def save_config(self) -> None:
         self.cfg.update({
             "dl_kind": _value_of(KINDS, self.kind_var.get(), "video"),
@@ -304,6 +458,13 @@ class DownloadTab(BaseTab):
             "dl_embed_metadata": bool(self.meta_var.get()),
             "dl_output_dir": self.out_var.get().strip(),
             "dl_urls": "\n".join(self._urls()),
+            "dy_batch": self._dy_batch(),
+            "dy_target": self.dy_target_var.get().strip(),
+            "dy_limit": self._dy_limit(),
+            "dy_page_interval": self._dy_interval(),
+            "dy_include_images": bool(self.dy_images_var.get()),
+            "dy_overwrite": bool(self.dy_overwrite_var.get()),
+            "dy_batch_subdir": bool(self.dy_subdir_var.get()),
         })
 
     def _sync_kind(self) -> None:
@@ -328,6 +489,10 @@ class DownloadTab(BaseTab):
         self.console.append("💡 这里只做下载，不会转写、也不消耗显卡。", "step")
         self.console.append("    · 想连带生成文字稿 → 用「视频转写」页的一键流程；", "muted")
         self.console.append("    · 先下载、之后再转写 → 下载完点「送去本地转写」。", "muted")
+        self.console.append("📱 抖音批量：粘贴对方主页链接会自动展开全部作品；"
+                            "自己的收藏 / 喜欢用下方「抖音批量下载」选择，并点该区的「开始批量下载」。", "step")
+        self.console.append("    · 需先在「环境安装」页扫码登录抖音；"
+                            "量大时建议先点「先预览清单」确认。", "muted")
 
     # ══════════════════════════════════════════════════════════════════
     def _preflight(self) -> bool:
@@ -358,27 +523,48 @@ class DownloadTab(BaseTab):
                 return False
         return True
 
-    def _start(self) -> None:
-        urls = self._urls()
-        if not urls:
-            messagebox.showinfo("请输入链接", "请先粘贴至少一个视频链接。", parent=self)
-            return
+    def _validate_douyin(self) -> bool:
+        """抖音批量的前置校验：必填目标 + cookies 是否就绪。"""
+        batch = self._dy_batch()
+        target = self.dy_target_var.get().strip()
+        _, _, required = DY_TARGET_SPEC.get(batch, ("", "", False))
+        if required and not target:
+            messagebox.showinfo(
+                "还缺一点信息",
+                "「对方个人主页的全部作品」需要填主页链接，"
+                "「本人的某个收藏夹」需要填收藏夹 ID。\n\n"
+                "收藏夹 ID 可以点「列出我的收藏夹」获取。",
+                parent=self)
+            return False
+        if not paths.douyin_logged_in():
+            if messagebox.askyesno(
+                "抖音还没登录",
+                "抖音批量下载需要本人登录态（douyin_cookies.json），当前没找到有效 cookies。\n\n"
+                "现在去「环境安装」页扫码登录吗？",
+                parent=self,
+            ):
+                self.app.show_page("env")
+            return False
+        return True
+
+    def _common_ready(self) -> str | None:
+        """两种下载方式共用的前置检查，返回 Python 路径；不通过返回 None。"""
+        if self.busy:
+            messagebox.showinfo("请稍候", "当前页面已有任务在运行，请等待完成或先点击「停止」。",
+                                parent=self)
+            return None
         py = self.require_python()
         if not py:
-            return
+            return None
         if not paths.project_ready():
             messagebox.showerror("缺少程序文件",
                                  f"找不到 media_downloader.py：\n{paths.runtime_dir()}", parent=self)
-            return
-        if not self._preflight():
-            return
+            return None
+        return py
 
-        self.save_config()
-        out_dir = self._output_dir()
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        task = jobs.download_task(
-            py, urls, out_dir,
+    def _media_kwargs(self) -> dict:
+        """「下载参数」卡片里的通用选项。"""
+        return dict(
             kind=_value_of(KINDS, self.kind_var.get(), "video"),
             quality=_value_of(QUALITIES, self.quality_var.get(), "best"),
             container=_value_of(CONTAINERS, self.container_var.get(), "mp4"),
@@ -389,8 +575,117 @@ class DownloadTab(BaseTab):
             platform=_value_of(PLATFORMS, self.platform_var.get(), "auto"),
             browser=_value_of(BROWSERS, self.browser_var.get(), "chrome"),
         )
-        self.console.append(f"⬇ 共 {len(urls)} 个链接，保存到：{out_dir}", "step")
+
+    def _start(self) -> None:
+        """上方「视频链接」的下载：只处理链接框里的链接，与抖音批量无关。"""
+        urls = self._urls()
+        if not urls:
+            messagebox.showinfo("请输入链接", "请先在上方粘贴至少一个视频链接。", parent=self)
+            return
+        py = self._common_ready()
+        if not py or not self._preflight():
+            return
+
+        self.save_config()
+        out_dir = self._output_dir()
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        task = jobs.download_task(py, urls, out_dir, **self._media_kwargs())
+        self.console.append(f"⬇ 下载 {len(urls)} 个链接", "step")
+        self.console.append(f"📁 保存到：{out_dir}", "step")
         self.start_task(task, on_done=lambda code: self._on_finished(task, code))
+
+    def _start_batch(self, list_only: bool = False) -> None:
+        """「抖音批量下载」区块独立的下载入口：不读取上方链接框。"""
+        py = self._common_ready()
+        if not py or not self._validate_douyin():
+            return
+        if not list_only and not self._preflight():
+            return
+
+        self.save_config()
+        out_dir = self._output_dir()
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        batch = self._dy_batch()
+        task = jobs.download_task(
+            py, [], out_dir,
+            **self._media_kwargs(),
+            dy_batch=batch,
+            dy_target=self.dy_target_var.get().strip(),
+            limit=self._dy_limit(),
+            page_interval=self._dy_interval(),
+            include_images=bool(self.dy_images_var.get()),
+            overwrite=bool(self.dy_overwrite_var.get()),
+            list_only=list_only,
+            batch_subdir=bool(self.dy_subdir_var.get()),
+            batch_folder=self._custom_batch_folder(batch),
+        )
+
+        n = self._dy_limit()
+        self.console.append(
+            f"{'👁 预览' if list_only else '⬇ 批量下载'}抖音「{_label_of(DY_BATCHES, batch)}」"
+            f"，数量上限：{n or '不限'}", "step")
+        self.console.append(
+            "    抖音列表接口有频率限制，翻页之间会等待几秒，请耐心等待…", "muted")
+        if not list_only:
+            tail = "（本批次会自动建子文件夹）" if self.dy_subdir_var.get() else ""
+            self.console.append(f"📁 保存到：{out_dir}{tail}", "step")
+        self.start_task(task, on_done=lambda code: self._on_finished(task, code))
+
+    def _preview_batch(self) -> None:
+        """只展开列表、不下载，让用户先确认数量和内容。"""
+        self._start_batch(list_only=True)
+
+    def _custom_batch_folder(self, batch: str) -> str:
+        """收藏夹用名称命名子目录（名称来自「列出我的收藏夹」的缓存）；其余交给后端自动命名。"""
+        if batch != "collects" or not self.dy_subdir_var.get():
+            return ""
+        cid = self.dy_target_var.get().strip()
+        names = self.cfg.get("dy_collects_names") or {}
+        name = str(names.get(cid) or "").strip() if isinstance(names, dict) else ""
+        return f"抖音_收藏夹_{name}" if name else ""
+
+    def _list_collects(self) -> None:
+        """读取本人收藏夹列表，供填写收藏夹 ID。"""
+        py = self.require_python()
+        if not py:
+            return
+        if not paths.douyin_logged_in():
+            if messagebox.askyesno(
+                "抖音还没登录",
+                "读取收藏夹需要本人登录态，现在去「环境安装」页扫码登录吗？",
+                parent=self,
+            ):
+                self.app.show_page("env")
+            return
+        task = jobs.douyin_collects_task(py)
+        self.console.append("📂 正在读取本人收藏夹列表…", "step")
+        self.start_task(task, on_done=lambda code: self._on_collects(task, code))
+
+    def _on_collects(self, task: ProcessTask, code: int) -> None:
+        data = jobs.parse_result(task.output) or {}
+        folders = data.get("collects") or []
+        if not folders:
+            self.console.append("⚠️ 没读到收藏夹，请查看上方日志（可能是登录态已失效）。", "warn")
+            return
+        names = dict(self.cfg.get("dy_collects_names") or {})
+        for f in folders:
+            cid, name = str(f.get("collects_id") or ""), str(f.get("name") or "").strip()
+            if cid and name:
+                names[cid] = name
+        self.cfg.update({"dy_collects_names": names})
+        self.console.append(f"📂 共 {len(folders)} 个收藏夹：", "success")
+        for f in folders:
+            self.console.append(
+                f"    · {f.get('name') or '(未命名)'}  {f.get('total', 0)} 个作品\n"
+                f"      ID: {f.get('collects_id')}", "info")
+        # 只有一个就直接填上，省得用户复制
+        if len(folders) == 1:
+            self.dy_target_var.set(str(folders[0].get("collects_id") or ""))
+            self.console.append("    已自动填入上方「收藏夹 ID」。", "muted")
+        else:
+            self.console.append("    复制想要的 ID 填到上方「收藏夹 ID」即可。", "muted")
 
     # ══════════════════════════════════════════════════════════════════
     def _on_finished(self, task: ProcessTask, code: int) -> None:
@@ -402,24 +697,53 @@ class DownloadTab(BaseTab):
 
         ok = data.get("success") or []
         errs = data.get("errors") or []
+        listing = data.get("listing") or []
+        batch_dirs = [d for d in (data.get("batch_dirs") or []) if d]
         self.last_files = [r.get("file_path", "") for r in ok if r.get("file_path")]
+        if batch_dirs:
+            self.console.append("📂 本批次子文件夹：", "step")
+            for d in batch_dirs:
+                self.console.append(f"    · {d}", "info")
+
+        # ── 预览模式：只展示展开出来的清单 ──
+        if not ok and listing:
+            self.console.append(f"👁 展开出 {len(listing)} 个视频（未下载）：", "success")
+            for i, e in enumerate(listing[:40], 1):
+                title = (e.get("title") or "").replace("\n", " ")[:46]
+                who = e.get("uploader") or ""
+                when = e.get("create_time") or ""
+                self.console.append(
+                    f"    {i:>3}. {('@' + who + '  ') if who else ''}{when}  {title}", "info")
+            if len(listing) > 40:
+                self.console.append(f"    … 其余 {len(listing) - 40} 个略", "muted")
+            self.console.append("    确认无误后点「抖音批量下载」里的「⬇ 开始批量下载」即可。", "muted")
 
         if ok:
             total = sum(r.get("file_size", 0) for r in ok)
-            self.console.append(f"✅ 成功下载 {len(ok)} 个文件，合计 {paths.fmt_bytes(total)}：", "success")
+            skipped = sum(1 for r in ok if r.get("skipped"))
+            tail_skip = f"（其中 {skipped} 个已存在被跳过）" if skipped else ""
+            self.console.append(
+                f"✅ 成功下载 {len(ok)} 个文件，合计 {paths.fmt_bytes(total)}{tail_skip}：",
+                "success")
             for r in ok:
                 extra = r.get("extra_files") or []
                 tail = f"  (+{len(extra)} 个附件)" if extra else ""
+                mark = "⏭" if r.get("skipped") else "·"
                 self.console.append(
-                    f"    · {r.get('title')}  {paths.fmt_bytes(r.get('file_size', 0))}{tail}\n"
+                    f"    {mark} {r.get('title')}  {paths.fmt_bytes(r.get('file_size', 0))}{tail}\n"
                     f"      → {r.get('file_path')}", "success")
             self.btn_to_local.configure(state="normal")
             self.after_var.set(f"最近下载 {len(self.last_files)} 个文件，可点左侧按钮直接转写它们。")
             if self.open_dir_var.get():
-                paths.open_in_explorer(self._output_dir())
+                # 单个批量子目录时直接打开它，否则打开总目录
+                target = Path(batch_dirs[0]) if len(batch_dirs) == 1 else self._output_dir()
+                paths.open_in_explorer(target if target.is_dir() else self._output_dir())
 
         for e in errs:
-            if e.get("error_type") == "login_required":
+            if e.get("error_type") == "batch_expand_failed":
+                self.console.append(f"❌ 批量展开失败：{e.get('url')}\n    {e.get('error')}",
+                                    "error")
+            elif e.get("error_type") == "login_required":
                 platform = e.get("platform", "")
                 self.console.append(f"⚠️ {platform} 需要登录：{e.get('reason')}", "warn")
                 if messagebox.askyesno(

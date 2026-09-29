@@ -40,6 +40,17 @@
       "problemMatcher": []
     },
     {
+      // 排查「IDE 里报缺依赖、exe 里却正常」这类问题：
+      // 多半是 IDE 选中的解释器和装了依赖的不是同一个
+      "label": "🩺 诊断：本机 Python 与依赖状态",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "scripts/doctor.py"
+      ],
+      "problemMatcher": []
+    },
+    {
       "label": "📦 安装基础依赖 (yt-dlp / rich)",
       "type": "shell",
       "command": "${command:python.interpreterPath}",

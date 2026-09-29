@@ -47,6 +47,7 @@ from main import (  # noqa: E402
     MODEL_QUALITY_RANK,
     WhisperNotReadyError,
     _check_whisper_ready,
+    _cuda_libs_error_entry,
     _fmt_duration,
     _pick_best_local_model,
 )
@@ -179,6 +180,7 @@ def transcribe_one(
     keep_temp: bool = False,
     with_timestamps: bool = True,
     verbose: bool = True,
+    device: str = "auto",
 ) -> dict:
     """转写一个本地文件并写出 transcript.md。"""
     from transcriber import transcribe   # 延迟导入：确认环境就绪后再加载
@@ -190,7 +192,7 @@ def transcribe_one(
     print(f"📁 开始转写: {src.name}")
     print(f"    路径: {src}")
     print(f"    体积: {size_mb:.1f} MB")
-    print(f"    模型: {model_size} | 语言: {language or '自动检测'}")
+    print(f"    模型: {model_size} | 语言: {language or '自动检测'} | 设备: {device}")
     print(f"{'='*60}")
 
     workdir = Path(tempfile.gettempdir()) / "video-summarizer-extract"
@@ -203,6 +205,7 @@ def transcribe_one(
             model_size=model_size,
             language=language,
             verbose=verbose,
+            device=device,
         )
     finally:
         if is_temp and not keep_temp:
@@ -274,6 +277,9 @@ def main() -> None:
                         choices=["tiny", "base", "small", "medium", "large-v2", "large-v3"],
                         help="Whisper 模型（默认自动选本地最优）")
     parser.add_argument("--language", "-l", default=None, help="强制语言，如 zh / en（默认自动检测）")
+    parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"],
+                        help="计算设备：auto=有 GPU 且 CUDA 库齐全时用 GPU，否则 CPU（默认）"
+                             " | cuda=强制 GPU | cpu=强制 CPU")
     parser.add_argument("--no-timestamps", action="store_true", help="不输出带时间戳段落")
     parser.add_argument("--keep-temp", action="store_true", help="保留 ffmpeg 抽出的临时 wav")
     parser.add_argument("--json", action="store_true", help="输出结构化 JSON 结果（供 GUI 解析）")
@@ -358,6 +364,7 @@ def main() -> None:
                 language=args.language,
                 keep_temp=args.keep_temp,
                 with_timestamps=not args.no_timestamps,
+                device=args.device,
             ))
         except WhisperNotReadyError as exc:
             errors.append({
@@ -368,6 +375,11 @@ def main() -> None:
             })
         except Exception as exc:
             print(f"\n❌ 转写失败: {src}\n   {exc}")
+            cuda_entry = _cuda_libs_error_entry(str(src), exc)
+            if cuda_entry:
+                errors.append(cuda_entry)
+                # 缺库是环境问题，后续文件必然同样失败
+                break
             traceback.print_exc()
             errors.append({"url": str(src), "error": str(exc)})
 

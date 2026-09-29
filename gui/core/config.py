@@ -22,6 +22,8 @@ DEFAULTS: dict[str, Any] = {
     "mode": "auto",
     "model": "auto",
     "language": "auto",
+    # Whisper 计算设备（一键转写 / 本地转写共用）：auto | cuda | cpu
+    "device": "auto",
     "browser": "chrome",
     "sub_lang": "",
     "keep_audio": False,
@@ -38,6 +40,15 @@ DEFAULTS: dict[str, Any] = {
     "dl_embed_metadata": False,
     "dl_output_dir": "",          # 空 = paths.videos_dir()
     "dl_urls": "",
+    # 抖音列表型批量（视频下载页的「抖音批量」区块）
+    "dy_batch": "post",           # post | like | collection | collects
+    "dy_target": "",              # 对方主页链接 / sec_uid / 收藏夹 ID
+    "dy_limit": 0,                # 0 = 不限
+    "dy_page_interval": 8,        # 翻页间隔秒数，太小容易触发风控
+    "dy_include_images": False,
+    "dy_overwrite": False,
+    "dy_batch_subdir": True,      # 每个批量任务单独建子目录
+    "dy_collects_names": {},      # 收藏夹 ID → 名称（用于子目录命名）
     # 本地转写（本地转写页）
     "local_model": "auto",
     "local_language": "auto",
